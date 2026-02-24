@@ -43,7 +43,7 @@ huggingface-cli login --token YOUR_TOKEN
 dataclaw prep
 
 # Configure
-dataclaw config --repo username/dataclaw-username
+dataclaw config --repo username/my-personal-claude-code-data
 dataclaw config --exclude "personal-stuff,scratch"
 dataclaw config --redact-usernames "my_github_handle,my_discord_name"
 dataclaw config --redact "my-domain.com,my-secret-project"
@@ -66,7 +66,7 @@ dataclaw export
 | `dataclaw prep` | Discover projects, check HF auth, output JSON |
 | `dataclaw list` | List all projects with exclusion status |
 | `dataclaw config` | Show current config |
-| `dataclaw config --repo user/dataclaw-user` | Set HF repo |
+| `dataclaw config --repo user/my-personal-claude-code-data` | Set HF repo |
 | `dataclaw config --exclude "a,b"` | Add excluded projects (appends) |
 | `dataclaw config --redact "str1,str2"` | Add strings to always redact (appends) |
 | `dataclaw config --redact-usernames "u1,u2"` | Add usernames to anonymize (appends) |
@@ -150,18 +150,18 @@ Each HF repo also includes a `metadata.json` with aggregate stats.
 <details>
 <summary><b>Finding datasets on Hugging Face</b></summary>
 
-All repos are named `{username}/dataclaw-{username}` and tagged `dataclaw`.
+All repos are named `{username}/my-personal-claude-code-data` and tagged `dataclaw`.
 
 - **Browse all:** [huggingface.co/datasets?other=dataclaw](https://huggingface.co/datasets?other=dataclaw)
 - **Load one:**
   ```python
   from datasets import load_dataset
-  ds = load_dataset("alice/dataclaw-alice", split="train")
+  ds = load_dataset("alice/my-personal-claude-code-data", split="train")
   ```
 - **Combine several:**
   ```python
   from datasets import load_dataset, concatenate_datasets
-  repos = ["alice/dataclaw-alice", "bob/dataclaw-bob"]
+  repos = ["alice/my-personal-claude-code-data", "bob/my-personal-claude-code-data"]
   ds = concatenate_datasets([load_dataset(r, split="train") for r in repos])
   ```
 

@@ -124,7 +124,7 @@ class TestMergeConfigList:
 class TestDefaultRepoName:
     def test_format(self):
         result = default_repo_name("alice")
-        assert result == "alice/dataclaw-alice"
+        assert result == "alice/my-personal-claude-code-data"
 
     def test_contains_username(self):
         result = default_repo_name("bob")

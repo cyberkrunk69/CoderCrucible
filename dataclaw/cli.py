@@ -62,8 +62,8 @@ def get_hf_username() -> str | None:
 
 
 def default_repo_name(hf_username: str) -> str:
-    """Standard repo name: {username}/dataclaw-{username}"""
-    return f"{hf_username}/dataclaw-{hf_username}"
+    """Standard repo name: {username}/my-personal-claude-code-data"""
+    return f"{hf_username}/my-personal-claude-code-data"
 
 
 def _compute_stage(config: DataClawConfig) -> tuple[str, int, str | None]:
@@ -858,7 +858,7 @@ def _run_export(args) -> None:
     if not repo_id:
         print(f"\nNo HF repo. Log in first: huggingface-cli login")
         print(f"Then re-run dataclaw and it will auto-detect your username.")
-        print(f"Or set manually: dataclaw config --repo username/dataclaw-username")
+        print(f"Or set manually: dataclaw config --repo username/my-personal-claude-code-data")
         print(f"\nLocal file: {output_path}")
         return
 
