@@ -1,4 +1,4 @@
-"""Local search functionality for DataClaw using scout.search.
+"""Local search functionality for CoderCrucible using scout.search.
 
 This module provides offline search capabilities for Claude Code sessions
 using BM25 ranking with confidence scores.
@@ -253,7 +253,7 @@ def search(
             logger.warning(f"Could not load config for anonymizer: {e}")
             display_anonymizer = AnonymizerWrapper()
     
-    # Format results for DataClaw users
+    # Format results for CoderCrucible users
     formatted = []
     for r in results:
         snippet = r.get("snippet", "")[:200]

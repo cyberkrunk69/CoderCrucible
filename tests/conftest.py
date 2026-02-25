@@ -1,8 +1,8 @@
-"""Shared fixtures for dataclaw tests."""
+"""Shared fixtures for codercrucible tests."""
 
 import pytest
 
-from dataclaw.parser import AnonymizerWrapper
+from codercrucible.parser import AnonymizerWrapper
 
 
 @pytest.fixture
@@ -56,8 +56,8 @@ def mock_anonymizer(monkeypatch):
 @pytest.fixture
 def tmp_config(tmp_path, monkeypatch):
     """Monkeypatch CONFIG_FILE and CONFIG_DIR to tmp_path."""
-    config_dir = tmp_path / ".dataclaw"
+    config_dir = tmp_path / ".codercrucible"
     config_file = config_dir / "config.json"
-    monkeypatch.setattr("dataclaw.config.CONFIG_DIR", config_dir)
-    monkeypatch.setattr("dataclaw.config.CONFIG_FILE", config_file)
+    monkeypatch.setattr("codercrucible.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("codercrucible.config.CONFIG_FILE", config_file)
     return config_file

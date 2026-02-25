@@ -1,4 +1,4 @@
-"""CLI for DataClaw — export Claude Code conversations to Hugging Face."""
+"""CLI for CoderCrucible — export Claude Code conversations to Hugging Face."""
 
 import argparse
 import json
@@ -8,14 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .parser import AnonymizerWrapper
-from .config import CONFIG_FILE, DataClawConfig, load_config, save_config
+from .config import CONFIG_FILE, CoderCrucibleConfig, load_config, save_config
 from .parser import CLAUDE_DIR, discover_projects, parse_project_sessions
 from .secrets import redact_session
 from .search import SEARCH_DB_PATH, build_index, search as do_search, get_index_stats
 
-HF_TAG = "dataclaw"
-REPO_URL = "https://github.com/banodoco/dataclaw"
-SKILL_URL = "https://raw.githubusercontent.com/banodoco/dataclaw/main/docs/SKILL.md"
+HF_TAG = "codercrucible"
+REPO_URL = "https://github.com/banodoco/codercrucible"
+SKILL_URL = "https://raw.githubusercontent.com/banodoco/codercrucible/main/docs/SKILL.md"
 
 
 def _mask_secret(s: str) -> str:
@@ -67,7 +67,7 @@ def default_repo_name(hf_username: str) -> str:
     return f"{hf_username}/my-personal-claude-code-data"
 
 
-def _compute_stage(config: DataClawConfig) -> tuple[str, int, str | None]:
+def _compute_stage(config: CoderCrucibleConfig) -> tuple[str, int, str | None]:
     """Return (stage_name, stage_number, hf_username)."""
     hf_user = get_hf_username()
     if not hf_user:
@@ -84,7 +84,7 @@ def _compute_stage(config: DataClawConfig) -> tuple[str, int, str | None]:
 
 
 def _build_status_next_steps(
-    stage: str, config: DataClawConfig, hf_user: str | None, repo_id: str | None,
+    stage: str, config: CoderCrucibleConfig, hf_user: str | None, repo_id: str | None,
 ) -> tuple[list[str], str | None]:
     """Return (next_steps, next_command) for the given stage."""
     if stage == "auth":
@@ -92,8 +92,8 @@ def _build_status_next_steps(
             [
                 "Ask the user for their Hugging Face token. Sign up: https://huggingface.co/join — Create WRITE token: https://huggingface.co/settings/tokens",
                 "Run: huggingface-cli login --token <THEIR_TOKEN> (NEVER run bare huggingface-cli login — it hangs)",
-                "Run: dataclaw config --redact \"<THEIR_TOKEN>\" (so the token gets redacted from exports)",
-                "Run: dataclaw prep (to confirm login and get next steps)",
+                "Run: codercrucible config --redact \"<THEIR_TOKEN>\" (so the token gets redacted from exports)",
+                "Run: codercrucible prep (to confirm login and get next steps)",
             ],
             None,
         )
@@ -103,14 +103,14 @@ def _build_status_next_steps(
         steps = []
         if not projects_confirmed:
             steps.append(
-                "Run: dataclaw prep — then show the user their projects list and ask which to EXCLUDE. "
-                "Configure: dataclaw config --exclude \"project1,project2\" "
-                "or dataclaw config --confirm-projects (to include all)"
+                "Run: codercrucible prep — then show the user their projects list and ask which to EXCLUDE. "
+                "Configure: codercrucible config --exclude \"project1,project2\" "
+                "or codercrucible config --confirm-projects (to include all)"
             )
         steps.extend([
             "Ask about GitHub/Discord usernames to anonymize and sensitive strings to redact. "
-            "Configure: dataclaw config --redact-usernames \"handle1\" and dataclaw config --redact \"string1\"",
-            "When done configuring, export locally: dataclaw export --no-push --output /tmp/dataclaw_export.jsonl",
+            "Configure: codercrucible config --redact-usernames \"handle1\" and codercrucible config --redact \"string1\"",
+            "When done configuring, export locally: codercrucible export --no-push --output /tmp/codercrucible_export.jsonl",
         ])
         # next_command is null because user input is needed before exporting
         return (steps, None)
@@ -120,29 +120,29 @@ def _build_status_next_steps(
             [
                 "Ask the user: 'What is your full name?' Then scan the export for it.",
                 "Run PII scan commands and review results with the user.",
-                "Ask the user: 'Are there any company names, internal project names, client names, private URLs, or other people's names in your conversations that you'd want redacted? Any custom domains or internal tools?' Add anything they mention with dataclaw config --redact.",
+                "Ask the user: 'Are there any company names, internal project names, client names, private URLs, or other people's names in your conversations that you'd want redacted? Any custom domains or internal tools?' Add anything they mention with codercrucible config --redact.",
                 "Do a deep manual scan: sample ~20 sessions from the export (beginning, middle, end) and scan for names, private URLs, company names, credentials in conversation text, and anything else that looks sensitive. Report findings to the user.",
-                "If PII found in any of the above, add redactions (dataclaw config --redact) and re-export: dataclaw export --no-push",
-                "Run: dataclaw confirm — scans for PII, shows the project breakdown, and unlocks pushing.",
-                "Do NOT push until the user explicitly confirms. Once confirmed, push: dataclaw export",
+                "If PII found in any of the above, add redactions (codercrucible config --redact) and re-export: codercrucible export --no-push",
+                "Run: codercrucible confirm — scans for PII, shows the project breakdown, and unlocks pushing.",
+                "Do NOT push until the user explicitly confirms. Once confirmed, push: codercrucible export",
             ],
-            "dataclaw confirm",
+            "codercrucible confirm",
         )
 
     if stage == "confirmed":
         return (
             [
-                "User has reviewed the export. Ask: 'Ready to publish to Hugging Face?' and push: dataclaw export",
+                "User has reviewed the export. Ask: 'Ready to publish to Hugging Face?' and push: codercrucible export",
             ],
-            "dataclaw export",
+            "codercrucible export",
         )
 
     # done
     dataset_url = f"https://huggingface.co/datasets/{repo_id}" if repo_id else None
     return (
         [
-            f"Done! Dataset is live{f' at {dataset_url}' if dataset_url else ''}. To update later: dataclaw export",
-            "To reconfigure: dataclaw prep then dataclaw config",
+            f"Done! Dataset is live{f' at {dataset_url}' if dataset_url else ''}. To update later: codercrucible export",
+            "To reconfigure: codercrucible prep then codercrucible config",
         ],
         None,
     )
@@ -165,7 +165,7 @@ def list_projects(claude_dir: Path | None = None) -> None:
     ))
 
 
-def _merge_config_list(config: DataClawConfig, key: str, new_values: list[str]) -> None:
+def _merge_config_list(config: CoderCrucibleConfig, key: str, new_values: list[str]) -> None:
     """Append new_values to a config list (deduplicated, sorted)."""
     existing = set(config.get(key, []))
     existing.update(new_values)
@@ -328,7 +328,7 @@ task_categories:
 language:
   - en
 tags:
-  - dataclaw
+  - codercrucible
   - claude-code
   - conversations
   - coding-assistant
@@ -340,9 +340,9 @@ pretty_name: Claude Code Conversations
 
 # Claude Code Conversation Logs
 
-Exported with [DataClaw]({REPO_URL}).
+Exported with [CoderCrucible]({REPO_URL}).
 
-**Tag: `dataclaw`** — [Browse all DataClaw datasets](https://huggingface.co/datasets?other=dataclaw)
+**Tag: `codercrucible`** — [Browse all CoderCrucible datasets](https://huggingface.co/datasets?other=codercrucible)
 
 ## Stats
 
@@ -407,19 +407,19 @@ ds = load_dataset("{repo_id}", split="train")
 ## Export your own
 
 ```bash
-pip install dataclaw
-dataclaw
+pip install codercrucible
+codercrucible
 ```
 """
 
 
 def update_skill(target: str) -> None:
-    """Download and install the dataclaw skill for a coding agent."""
+    """Download and install the codercrucible skill for a coding agent."""
     if target != "claude":
         print(f"Error: unknown target '{target}'. Supported: claude", file=sys.stderr)
         sys.exit(1)
 
-    dest = Path.cwd() / ".claude" / "skills" / "dataclaw" / "SKILL.md"
+    dest = Path.cwd() / ".claude" / "skills" / "codercrucible" / "SKILL.md"
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Downloading skill from {SKILL_URL}...")
@@ -441,8 +441,8 @@ def update_skill(target: str) -> None:
     print(f"Skill installed to {dest}")
     print(json.dumps({
         "installed": str(dest),
-        "next_steps": ["Run: dataclaw prep"],
-        "next_command": "dataclaw prep",
+        "next_steps": ["Run: codercrucible prep"],
+        "next_command": "codercrucible prep",
     }, indent=2))
 
 
@@ -477,11 +477,11 @@ def _find_export_file(file_path: Path | None) -> Path:
     if file_path and file_path.exists():
         return file_path
     if file_path is None:
-        for c in [Path("/tmp/dataclaw_export.jsonl"), Path("dataclaw_conversations.jsonl")]:
+        for c in [Path("/tmp/codercrucible_export.jsonl"), Path("codercrucible_conversations.jsonl")]:
             if c.exists():
                 return c
     print(json.dumps({
-        "error": "No export file found. Run: dataclaw export --no-push --output /tmp/dataclaw_export.jsonl",
+        "error": "No export file found. Run: codercrucible export --no-push --output /tmp/codercrucible_export.jsonl",
     }))
     sys.exit(1)
 
@@ -564,14 +564,14 @@ def confirm(file_path: Path | None = None) -> None:
     if pii_findings:
         next_steps.append(
             "PII findings detected — review each one with the user. "
-            "If real: dataclaw config --redact \"string\" then re-export with --no-push. "
+            "If real: codercrucible config --redact \"string\" then re-export with --no-push. "
             "False positives can be ignored."
         )
     next_steps.extend([
-        "If any project should be excluded, run: dataclaw config --exclude \"project_name\" and re-export with --no-push.",
+        "If any project should be excluded, run: codercrucible config --exclude \"project_name\" and re-export with --no-push.",
         f"This will publish {total} sessions ({_format_size(file_size)}) publicly to Hugging Face"
         + (f" at {repo_id}" if repo_id else "") + ". Ask the user: 'Are you ready to proceed?'",
-        "Once confirmed, push: dataclaw export",
+        "Once confirmed, push: codercrucible export",
     ])
 
     result = {
@@ -590,7 +590,7 @@ def confirm(file_path: Path | None = None) -> None:
         "repo": repo_id,
         "last_export_timestamp": last_export.get("timestamp"),
         "next_steps": next_steps,
-        "next_command": "dataclaw export",
+        "next_command": "codercrucible export",
     }
     print(json.dumps(result, indent=2))
 
@@ -656,7 +656,7 @@ def prep(claude_dir: Path | None = None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="DataClaw — Claude Code -> Hugging Face")
+    parser = argparse.ArgumentParser(description="CoderCrucible — Claude Code -> Hugging Face")
     parser.add_argument(
         "--claude-dir", 
         type=Path, 
@@ -671,7 +671,7 @@ def main() -> None:
     cf.add_argument("--file", "-f", type=Path, default=None, help="Path to export JSONL file")
     sub.add_parser("list", help="List all projects")
 
-    us = sub.add_parser("update-skill", help="Install/update the dataclaw skill for a coding agent")
+    us = sub.add_parser("update-skill", help="Install/update the codercrucible skill for a coding agent")
     us.add_argument("target", choices=["claude"], help="Agent to install skill for")
 
     cfg = sub.add_parser("config", help="View or set config")
@@ -685,7 +685,7 @@ def main() -> None:
                      help="Mark project selection as confirmed (include all)")
 
     exp = sub.add_parser("export", help="Export and push (default)")
-    # Export flags on both the subcommand and root parser so `dataclaw --no-push` works
+    # Export flags on both the subcommand and root parser so `codercrucible --no-push` works
     for target in (exp, parser):
         target.add_argument("--output", "-o", type=Path, default=None)
         target.add_argument("--repo", "-r", type=str, default=None)
@@ -781,7 +781,7 @@ def _handle_index(args, claude_dir: Path | None = None) -> None:
         projects = _parse_csv_arg(args.projects)
     
     print("=" * 50)
-    print("  DataClaw — Building Search Index")
+    print("  CoderCrucible — Building Search Index")
     print("=" * 50)
     
     # Use provided claude_dir or fall back to default
@@ -813,8 +813,8 @@ def _handle_index(args, claude_dir: Path | None = None) -> None:
         "projects_indexed": result["projects_indexed"],
         "index_path": result.get("index_path"),
         "next_steps": [
-            "Search your conversations: dataclaw search \"your query\"",
-            "Re-index after new sessions: dataclaw index",
+            "Search your conversations: codercrucible search \"your query\"",
+            "Re-index after new sessions: codercrucible index",
         ],
         "next_command": None,
     }, indent=2))
@@ -840,9 +840,9 @@ def _handle_search(args) -> None:
     if not results:
         if not args.json:
             print("No results found. Try:")
-            print("  - Building the index: dataclaw index")
+            print("  - Building the index: codercrucible index")
             print("  - Using different search terms")
-            print("  - Lowering min-confidence: dataclaw search \"query\" --min-confidence 10")
+            print("  - Lowering min-confidence: codercrucible search \"query\" --min-confidence 10")
         print(json.dumps({"results": [], "count": 0}, indent=2))
         return
     
@@ -874,19 +874,19 @@ def _handle_search(args) -> None:
 
 def _run_export(args) -> None:
     """Run the export flow — discover, anonymize, export, optionally push."""
-    # Gate: require `dataclaw confirm` before pushing
+    # Gate: require `codercrucible confirm` before pushing
     if not args.no_push:
         config = load_config()
         if config.get("stage") != "confirmed":
             print(json.dumps({
-                "error": "You must run `dataclaw confirm` before pushing.",
-                "hint": "Export first with --no-push, review the data, then run `dataclaw confirm`.",
-                "next_command": "dataclaw confirm",
+                "error": "You must run `codercrucible confirm` before pushing.",
+                "hint": "Export first with --no-push, review the data, then run `codercrucible confirm`.",
+                "next_command": "codercrucible confirm",
             }, indent=2))
             sys.exit(1)
 
     print("=" * 50)
-    print("  DataClaw — Claude Code Log Exporter")
+    print("  CoderCrucible — Claude Code Log Exporter")
     print("=" * 50)
 
     if not CLAUDE_DIR.exists():
@@ -933,7 +933,7 @@ def _run_export(args) -> None:
         print(f"  - {p['display_name']} (excluded)")
 
     if not included:
-        print("\nNo projects to export. Run: dataclaw config --exclude ''")
+        print("\nNo projects to export. Run: codercrucible config --exclude ''")
         sys.exit(1)
 
     # Build anonymizer with extra usernames from config
@@ -949,7 +949,7 @@ def _run_export(args) -> None:
         print(f"Redacting custom strings: {len(custom_strings)} configured")
 
     # Export
-    output_path = args.output or Path("dataclaw_conversations.jsonl")
+    output_path = args.output or Path("codercrucible_conversations.jsonl")
 
     print(f"\nExporting to {output_path}...")
     meta = export_to_jsonl(
@@ -995,8 +995,8 @@ def _run_export(args) -> None:
 
     if not repo_id:
         print(f"\nNo HF repo. Log in first: huggingface-cli login")
-        print(f"Then re-run dataclaw and it will auto-detect your username.")
-        print(f"Or set manually: dataclaw config --repo username/my-personal-claude-code-data")
+        print(f"Then re-run codercrucible and it will auto-detect your username.")
+        print(f"Or set manually: codercrucible config --repo username/my-personal-claude-code-data")
         print(f"\nLocal file: {output_path}")
         return
 
@@ -1011,8 +1011,8 @@ def _run_export(args) -> None:
         "total_stages": 4,
         "dataset_url": f"https://huggingface.co/datasets/{repo_id}",
         "next_steps": [
-            "Done! Dataset is live. To update later: dataclaw export",
-            "To reconfigure: dataclaw prep then dataclaw config",
+            "Done! Dataset is live. To update later: codercrucible export",
+            "To reconfigure: codercrucible prep then codercrucible config",
         ],
         "next_command": None,
     }
@@ -1037,7 +1037,7 @@ def _print_pii_guidance(output_path: Path) -> None:
     print(f"\n{'=' * 50}")
     print("  IMPORTANT: Review your data before publishing!")
     print(f"{'=' * 50}")
-    print("DataClaw's automatic redaction is NOT foolproof.")
+    print("CoderCrucible's automatic redaction is NOT foolproof.")
     print("You should scan the exported data for remaining PII.")
     print()
     print("Quick checks (run these and review any matches):")
@@ -1051,11 +1051,11 @@ def _print_pii_guidance(output_path: Path) -> None:
     print(f"  grep -i 'THEIR_NAME' {abs_output} | head -10")
     print()
     print("To add custom redactions, then re-export:")
-    print("  dataclaw config --redact-usernames 'github_handle,discord_name'")
-    print("  dataclaw config --redact 'secret-domain.com,my-api-key'")
-    print(f"  dataclaw export --no-push -o {abs_output}")
+    print("  codercrucible config --redact-usernames 'github_handle,discord_name'")
+    print("  codercrucible config --redact 'secret-domain.com,my-api-key'")
+    print(f"  codercrucible export --no-push -o {abs_output}")
     print()
-    print(f"Found an issue? Help improve DataClaw: {REPO_URL}/issues")
+    print(f"Found an issue? Help improve CoderCrucible: {REPO_URL}/issues")
 
 
 if __name__ == "__main__":

@@ -1,287 +1,211 @@
-# DataClaw
+# CoderCrucible
 
-Turn your Claude Code conversation history into structured training data and publish it to Hugging Face with a single command. DataClaw parses session logs, redacts secrets and PII, and uploads the result as a ready-to-use dataset — so the hours you spend coding with Claude can help make future models better.
+Turn your AI coding conversations into a clean, shareable, community‑owned dataset.
 
-![DataClaw](dataclaw.jpeg)
+CoderCrucible is a privacy‑first tool that ingests logs from any coding assistant (Cursor, Copilot, Claude, Cline, Continue, etc.), strips away everything that could identify you or the provider, and outputs a unified, searchable, training‑ready dataset. You keep control. You choose what to share. Together, we build the world's largest open corpus of real human‑AI coding interactions.
 
-Every export is tagged **`dataclaw`** on Hugging Face. Together, they may someday form a growing [distributed dataset](https://huggingface.co/datasets?other=dataclaw) of real-world human-AI coding collaboration.
+📖 Read the Manifesto
+Before you dive in, understand why this matters.
+👉 [The CoderCrucible Manifesto – on data as power, waste as business model, and why your conversations belong to the world.](manifesto.txt)
 
-## Give this to your agent
+Why CoderCrucible?
+- Anonymization by default – Usernames, paths, model names, even invisible watermarks – all gone.
+- Multi‑agent support – Works with Cursor, Copilot, Cline, Continue, Claude, Windsurf, and more.
+- Local search – Instantly find past conversations with BM25F and AST‑based search.
+- Optional enrichment – Add intent, emotion, and security tags using a small LLM (e.g., Groq 8B).
+- Export to any format – JSONL, ChatML, Alpaca – ready for fine‑tuning or research.
+- Auditable – Every change is logged so you know exactly what was redacted.
 
-Paste this into Claude Code (or any coding agent):
+When you share your anonymized data, you're not just donating – you're breaking the data monopoly and forcing a race to the top: better models, lower prices, and real innovation.
 
-```
-Help me export my Claude Code conversation history to Hugging Face using DataClaw.
-Install it, set up the skill, then walk me through the process.
+---
 
-STEP 1 — INSTALL
-  pip install dataclaw
-  If that fails: git clone https://github.com/banodoco/dataclaw.git /tmp/dataclaw && pip install /tmp/dataclaw
-  If that also fails, ask the user where the source is.
+## Why this fork exists
 
-STEP 2 — INSTALL SKILL
-  dataclaw update-skill claude
+The original CoderCrucible was built to export Claude Code conversations to Hugging Face. This fork goes further:
 
-STEP 3 — START
-  dataclaw prep
-  Every dataclaw command outputs next_steps in its JSON — follow them through the entire flow.
+- **Anonymization by default** – Not just usernames and paths, but also **model names**, provider fingerprints, and even subtle watermarks (like token‑specific patterns) are stripped.  
+- **Local search** – Index your conversations with BM25F and AST, so you can instantly find that bug fix you discussed months ago.  
+- **Semantic enrichment (optional)** – Use a small LLM (Groq 8B) to add intent, emotion, or security tags to your sessions – all running on your machine or with a cheap cloud call.  
+- **Universal schema** – All conversations are normalized into a single format, ready for training, fine‑tuning, or research.  
+- **Legally safer** – By removing provider‑specific signatures, watermarks, and invisible tokens, the resulting dataset becomes **unidentifiable** to its source. This protects you and respects the terms of service of the original AI providers.
 
-IMPORTANT: Never run bare `huggingface-cli login` — always use --token.
-IMPORTANT: Always export with --no-push first and review for PII before publishing.
-```
+Our goal is to **crowdsource a massive, high‑quality dataset of real coding conversations** – contributed voluntarily by users, fully anonymized, and clean of any proprietary fingerprints – to advance the next generation of coding models.
 
-<details>
-<summary><b>Manual usage (without an agent)</b></summary>
+---
 
-### Quick start
+## Features
+
+- **Multi‑agent support** – Parse conversations from:
+  - Claude Code (original)
+  - Cursor
+  - GitHub Copilot Chat
+  - Cline
+  - Continue.dev
+  - Windsurf / Codeium
+  - (More coming soon)
+- **Deep anonymization**:
+  - Usernames and file paths → deterministic hashes
+  - Model names → generic labels (`<model‑anthropic>`, `<model‑openai>`, etc.)
+  - Provider‑specific phrasing and watermarks removed
+  - Secret scanning (API keys, tokens, passwords) via regex + entropy
+  - Email redaction
+- **Local search**:
+  - BM25F ranking with confidence scores
+  - AST‑based fact extraction for code‑aware search
+  - Fully offline, zero cost
+- **Semantic enrichment (experimental)**:
+  - `think-cheap` – Groq 8B adds intent, emotional tags, security markers (requires API key, but cheap)
+  - `think-hard` – MiniMax for cross‑session pattern discovery (coming soon)
+- **Export to universal training formats** – JSONL, ChatML, Alpaca, plain text
+- **Privacy‑first** – All anonymization happens locally; nothing leaves your machine unless you explicitly choose to share.
+
+---
+
+## Quick Start
 
 ```bash
-pip install dataclaw
+# Install
+pip install codercrucible  # from this fork (once published) or from source
+
+# Authenticate with Hugging Face (only if you want to upload)
 huggingface-cli login --token YOUR_TOKEN
 
-# See your projects
-dataclaw prep
+# Discover conversations from all supported agents
+codercrucible discover
 
-# Configure
-dataclaw config --repo username/my-personal-claude-code-data
-dataclaw config --exclude "personal-stuff,scratch"
-dataclaw config --redact-usernames "my_github_handle,my_discord_name"
-dataclaw config --redact "my-domain.com,my-secret-project"
+# Configure redaction (optional)
+codercrucible config --redact-usernames "my_github_handle,my_discord_name"
+codercrucible config --redact "my-domain.com,my-secret-project"
 
-# Export locally first
-dataclaw export --no-push
+# Export locally, fully anonymized
+codercrucible export --output ./my_data.jsonl
 
-# Review and confirm
-dataclaw confirm
+# Review and confirm (shows you what will be redacted)
+codercrucible confirm
 
-# Push
-dataclaw export
+# Upload to Hugging Face (optional, always private by default)
+codercrucible export --push
 ```
 
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `dataclaw status` | Show current stage and next steps (JSON) |
-| `dataclaw prep` | Discover projects, check HF auth, output JSON |
-| `dataclaw list` | List all projects with exclusion status |
-| `dataclaw config` | Show current config |
-| `dataclaw config --repo user/my-personal-claude-code-data` | Set HF repo |
-| `dataclaw config --exclude "a,b"` | Add excluded projects (appends) |
-| `dataclaw config --redact "str1,str2"` | Add strings to always redact (appends) |
-| `dataclaw config --redact-usernames "u1,u2"` | Add usernames to anonymize (appends) |
-| `dataclaw config --confirm-projects` | Mark project selection as confirmed |
-| `dataclaw export --no-push` | Export locally only (always do this first) |
-| `dataclaw confirm` | Scan for PII, summarize export, unlock pushing |
-| `dataclaw export` | Export and push (requires `dataclaw confirm` first) |
-| `dataclaw export --all-projects` | Include everything (ignore exclusions) |
-| `dataclaw export --no-thinking` | Exclude extended thinking blocks |
-| `dataclaw update-skill claude` | Install/update the dataclaw skill for Claude Code |
-| `dataclaw index` | Build search index from Claude Code sessions |
-| `dataclaw search "query"` | Search indexed sessions with BM25 ranking |
-
-</details>
-
-<details>
-<summary><b>Local Search</b></summary>
-
-DataClaw can index your Claude Code conversations for fast, offline search using BM25 ranking with confidence scores.
-
-### Quick Start
+### Local search
 
 ```bash
-# First, build the index (one-time or after new sessions)
-dataclaw index
+# Build the search index (one-time)
+codercrucible index
 
-# Or specify a custom Claude Code directory
-dataclaw index --claude-dir /path/to/claude/data
-
-# Then search your conversations
-dataclaw search "authentication bug"
-dataclaw search "API error" --limit 10
-dataclaw search "refactor" --min-confidence 50
+# Search your conversations
+codercrucible search "authentication bug"
+codercrucible search "API error" --limit 10
 ```
 
-### Search Commands
-
-| Command | Description |
-|---------|-------------|
-| `dataclaw index` | Scan all projects and build search index |
-| `dataclaw index --force` | Rebuild index from scratch |
-| `dataclaw index --projects "proj1,proj2"` | Index specific projects only |
-| `dataclaw index --claude-dir /path/to/.claude` | Use a custom Claude Code directory |
-| `dataclaw search "query"` | Search with BM25 ranking |
-| `dataclaw search "query" --limit 10` | Limit results |
-| `dataclaw search "query" --min-confidence 50` | Filter by confidence |
-| `dataclaw search "query" --json` | Output results as JSON only |
-| `dataclaw search "query" --no-anonymize` | Don't anonymize snippets (for debugging) |
-
-### Search Design: Raw Indexing, Anonymized Display
-
-DataClaw's search is designed to balance **searchability** with **privacy**:
-
-- **Raw content is indexed** — Session content is indexed exactly as-is, so you can search for original terms like `/Users/alice/project/file.py` or your actual usernames.
-- **Results are anonymized at display time** — When showing search results, snippets are anonymized on-the-fly using scout-core's AnonymizerTool, so paths and usernames are hashed before being displayed.
-- **No privacy leak** — The original raw content stays only in your local index (which is stored in `~/.dataclaw/search.db`). It's never sent anywhere.
-
-This means you get full searchability while keeping your exported data privacy-safe.
-
-### Specifying Claude Code Directory
-
-By default, DataClaw looks for Claude Code sessions in `~/.claude`. You can override this:
+### Semantic enrichment (experimental)
 
 ```bash
-# Using CLI flag (any command)
-dataclaw index --claude-dir /path/to/claude/data
+# Enrich sessions with intent/emotion tags (requires Groq API key)
+codercrucible think-cheap --dimensions intent,emotional
 ```
 
-This is useful for:
-- Indexing sessions from another machine
-- Using a custom Claude Code data location
-- Testing with sample data
+---
 
-### Configuration
+## How anonymization works
 
-You can configure search behavior via `dataclaw config`:
+We apply multiple layers to ensure no traceable information remains:
 
-```bash
-# Set max content length per session (default: 20000 chars)
-# This controls how much of each session is indexed
-dataclaw config --search-max-content 30000
-```
+| Layer | What it removes |
+|-------|-----------------|
+| Paths | `/Users/alice/project/file.py` → `~/project/file.py` |
+| Usernames | `alice` → `user_a1b2c3d4` (deterministic hash) |
+| Model names | `claude-3-5-sonnet-20241022` → `<model‑anthropic>` |
+| Provider watermarks | Custom phrases like "As an AI from Anthropic" → generic |
+| Secrets | API keys, JWTs, tokens → `<REDACTED>` |
+| Emails | `alice@example.com` → `<email>` |
+| Invisible tokens | Known token‑specific patterns (e.g., certain Unicode variations) stripped |
 
-### How It Works
+All replacements are logged to `~/.scout/audit.jsonl` so you can see exactly what was changed.
 
-- The index is stored in `~/.dataclaw/search.db`
-- Search uses BM25 ranking for relevance
-- Confidence scores (0-100) indicate match quality
-- Snippets show context around search terms
-- Sn before display usingippets are anonymized scout-core's AnonymizerTool
+---
 
-### Requirements
+## The universal schema
 
-Local search requires scout-core:
-
-```bash
-pip install scout-core
-# Or for local development:
-pip install -e ../scout
-```
-
-### Anonymizer Integration
-
-DataClaw uses scout-core's `AnonymizerTool` for consistent, auditable PII redaction. This provides:
-
-- **Deterministic hashing** — Same username always produces the same hash
-- **Audit logging** — All anonymization operations are logged to `~/.scout/audit.jsonl`
-- **Multiple patterns** — Handles `/Users/username/`, `/home/username/`, `-Users-username-`, temp paths, and more
-- **Extra usernames** — Additional usernames (GitHub handles, etc.) from your config are also hashed
-
-The anonymizer is applied at display time to search snippets, not during indexing, ensuring you can find your conversations while keeping displayed results privacy-safe.
-
-</details>
-
-<details>
-<summary><b>What gets exported</b></summary>
-
-| Data | Included | Notes |
-|------|----------|-------|
-| User messages | Yes | Full text (including voice transcripts) |
-| Assistant responses | Yes | Full text output |
-| Extended thinking | Yes | Claude's reasoning (opt out with `--no-thinking`) |
-| Tool calls | Yes | Tool name + summarized input |
-| Tool results | No | Not stored in Claude Code's logs |
-| Token usage | Yes | Input/output tokens per session |
-| Model & metadata | Yes | Model name, git branch, timestamps |
-
-### Privacy & Redaction
-
-DataClaw applies multiple layers of protection:
-
-1. **Path anonymization** — File paths stripped to project-relative (powered by scout-core)
-2. **Username hashing** — Your macOS username + any configured usernames replaced with stable hashes (powered by scout-core)
-3. **Secret detection** — Regex patterns catch JWT tokens, API keys (Anthropic, OpenAI, HF, GitHub, AWS, etc.), database passwords, private keys, Discord webhooks, and more
-4. **Entropy analysis** — Long high-entropy strings in quotes are flagged as potential secrets
-5. **Email redaction** — Personal email addresses removed
-6. **Custom redaction** — You can configure additional strings and usernames to redact
-7. **Tool input pre-redaction** — Secrets in tool inputs are redacted BEFORE truncation to prevent partial leaks
-
-> **Note:** Username and path anonymization is powered by scout-core. Audit logs for anonymization are stored in `~/.scout/audit.jsonl`.
-
-**This is NOT foolproof.** Always review your exported data before publishing.
-Automated redaction cannot catch everything — especially service-specific
-identifiers, third-party PII, or secrets in unusual formats.
-
-To help improve redaction, report issues: https://github.com/banodoco/dataclaw/issues
-
-</details>
-
-<details>
-<summary><b>Data schema</b></summary>
-
-Each line in `conversations.jsonl` is one session:
+Every conversation is normalized into a single JSONL format, making it easy to combine datasets from different sources and use them for training.
 
 ```json
 {
-  "session_id": "abc-123",
-  "project": "my-project",
-  "model": "claude-opus-4-6",
-  "git_branch": "main",
-  "start_time": "2025-06-15T10:00:00+00:00",
-  "end_time": "2025-06-15T10:30:00+00:00",
+  "meta": {
+    "source_agent": "cursor",
+    "session_id": "uuid-v4",
+    "project_hash": "sha256-of-project-root",
+    "start_time": 1729900000,
+    "end_time": 1729903600,
+    "quality_score": 0.85,
+    "schema_version": "1.0"
+  },
   "messages": [
-    {"role": "user", "content": "Fix the login bug", "timestamp": "..."},
     {
+      "index": 0,
+      "role": "user",
+      "content": "Refactor the login function to use OAuth.",
+      "timestamp": 1729900000,
+      "annotations": {
+        "file_refs": ["src/auth/login.ts"],
+        "tool_calls": null
+      }
+    },
+    {
+      "index": 1,
       "role": "assistant",
-      "content": "I'll investigate the login flow.",
-      "thinking": "The user wants me to look at...",
-      "tool_uses": [{"tool": "Read", "input": "src/auth.py"}],
-      "timestamp": "..."
+      "content": "Here is the refactored code...",
+      "timestamp": 1729900050,
+      "annotations": {
+        "file_refs": ["src/auth/login.ts"],
+        "tool_calls": [
+          {
+            "name": "write_to_file",
+            "args": { "path": "src/auth/login.ts", "content": "..." },
+            "result": "success"
+          }
+        ],
+        "thinking": "I need to ensure backward compatibility..."
+      }
     }
-  ],
-  "stats": {
-    "user_messages": 5, "assistant_messages": 8,
-    "tool_uses": 20, "input_tokens": 50000, "output_tokens": 3000
-  }
+  ]
 }
 ```
 
-Each HF repo also includes a `metadata.json` with aggregate stats.
+---
 
-</details>
+## Why this is legally safer
 
-<details>
-<summary><b>Finding datasets on Hugging Face</b></summary>
+AI providers often embed subtle fingerprints in their outputs – model names, specific phrasing patterns, or even invisible Unicode characters. By aggressively stripping these, we produce a dataset that **cannot be easily traced back to a specific provider**. This:
 
-All repos are named `{username}/my-personal-claude-code-data` and tagged `dataclaw`.
+- Protects you from potential terms‑of‑service disputes.
+- Enables truly open research without fear of retraction.
+- Allows the community to build on data from many sources without contamination.
 
-- **Browse all:** [huggingface.co/datasets?other=dataclaw](https://huggingface.co/datasets?other=dataclaw)
-- **Load one:**
-  ```python
-  from datasets import load_dataset
-  ds = load_dataset("alice/my-personal-claude-code-data", split="train")
-  ```
-- **Combine several:**
-  ```python
-  from datasets import load_dataset, concatenate_datasets
-  repos = ["alice/my-personal-claude-code-data", "bob/my-personal-claude-code-data"]
-  ds = concatenate_datasets([load_dataset(r, split="train") for r in repos])
-  ```
+Of course, **no method is perfect**. We encourage you to review your data before sharing. The tool always exports locally first, and you must explicitly run `codercrucible confirm` to see what will be redacted before any upload.
 
-The auto-generated HF README includes:
-- Model distribution (which Claude models, how many sessions each)
-- Total token counts
-- Project count
-- Last updated timestamp
+---
 
-</details>
+## Contributing
 
-## Code Quality
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-<p align="center">
-  <img src="scorecard.png" alt="Code Quality Scorecard">
-</p>
+Our immediate roadmap:
+
+- [ ] Add support for more agents (Tabnine, Codeium, etc.)
+- [ ] Improve watermark detection (ML‑based fingerprint removal)
+- [ ] Add quality scoring (heuristic + LLM)
+- [ ] Build a public dataset repository on Hugging Face with a unified license
+
+---
 
 ## License
 
-MIT
+This fork is released under the **MIT License**, same as the original CoderCrucible. All contributed data remains the property of the contributors; we only provide the tool.
+
+---
+
+## Acknowledgments
+
+Huge thanks to the original CoderCrucible authors for the excellent foundation. This fork builds on their work to create a more privacy‑conscious, legally‑safe, and feature‑rich tool for the community.

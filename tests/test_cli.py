@@ -1,4 +1,4 @@
-"""Tests for dataclaw.cli — CLI commands and helpers."""
+"""Tests for codercrucible.cli — CLI commands and helpers."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dataclaw.cli import (
+from codercrucible.cli import (
     _build_dataset_card,
     _format_size,
     _format_token_count,
@@ -147,7 +147,7 @@ class TestBuildDatasetCard:
         }
         card = _build_dataset_card("user/repo", meta)
         assert "---" in card  # YAML frontmatter
-        assert "dataclaw" in card
+        assert "codercrucible" in card
         assert "claude-sonnet" in card
         assert "10" in card
 
@@ -191,7 +191,7 @@ class TestExportToJsonl:
             "project": "test",
         }]
         monkeypatch.setattr(
-            "dataclaw.cli.parse_project_sessions",
+            "codercrucible.cli.parse_project_sessions",
             lambda *a, **kw: session_data,
         )
 
@@ -212,7 +212,7 @@ class TestExportToJsonl:
             "stats": {},
         }]
         monkeypatch.setattr(
-            "dataclaw.cli.parse_project_sessions",
+            "codercrucible.cli.parse_project_sessions",
             lambda *a, **kw: session_data,
         )
         projects = [{"dir_name": "test", "display_name": "test"}]
@@ -229,7 +229,7 @@ class TestExportToJsonl:
             "stats": {"input_tokens": 10, "output_tokens": 5},
         }]
         monkeypatch.setattr(
-            "dataclaw.cli.parse_project_sessions",
+            "codercrucible.cli.parse_project_sessions",
             lambda *a, **kw: session_data,
         )
         projects = [{"dir_name": "test", "display_name": "test"}]
@@ -245,7 +245,7 @@ class TestExportToJsonl:
             "stats": {},
         }]
         monkeypatch.setattr(
-            "dataclaw.cli.parse_project_sessions",
+            "codercrucible.cli.parse_project_sessions",
             lambda *a, **kw: session_data,
         )
         projects = [{"dir_name": "t", "display_name": "t"}]
@@ -260,19 +260,19 @@ class TestExportToJsonl:
 class TestConfigure:
     def test_sets_repo(self, tmp_config, monkeypatch, capsys):
         # Also monkeypatch the cli module's references
-        monkeypatch.setattr("dataclaw.cli.CONFIG_FILE", tmp_config)
-        monkeypatch.setattr("dataclaw.cli.load_config", lambda: {"repo": None, "excluded_projects": [], "redact_strings": []})
+        monkeypatch.setattr("codercrucible.cli.CONFIG_FILE", tmp_config)
+        monkeypatch.setattr("codercrucible.cli.load_config", lambda: {"repo": None, "excluded_projects": [], "redact_strings": []})
         saved = {}
-        monkeypatch.setattr("dataclaw.cli.save_config", lambda c: saved.update(c))
+        monkeypatch.setattr("codercrucible.cli.save_config", lambda c: saved.update(c))
 
         configure(repo="alice/my-repo")
         assert saved["repo"] == "alice/my-repo"
 
     def test_merges_exclude(self, tmp_config, monkeypatch, capsys):
-        monkeypatch.setattr("dataclaw.cli.CONFIG_FILE", tmp_config)
-        monkeypatch.setattr("dataclaw.cli.load_config", lambda: {"excluded_projects": ["a"], "redact_strings": []})
+        monkeypatch.setattr("codercrucible.cli.CONFIG_FILE", tmp_config)
+        monkeypatch.setattr("codercrucible.cli.load_config", lambda: {"excluded_projects": ["a"], "redact_strings": []})
         saved = {}
-        monkeypatch.setattr("dataclaw.cli.save_config", lambda c: saved.update(c))
+        monkeypatch.setattr("codercrucible.cli.save_config", lambda c: saved.update(c))
 
         configure(exclude=["b", "c"])
         assert sorted(saved["excluded_projects"]) == ["a", "b", "c"]
@@ -284,11 +284,11 @@ class TestConfigure:
 class TestListProjects:
     def test_with_projects(self, monkeypatch, capsys):
         monkeypatch.setattr(
-            "dataclaw.cli.discover_projects",
+            "codercrucible.cli.discover_projects",
             lambda claude_dir=None: [{"display_name": "proj1", "session_count": 5, "total_size_bytes": 1024}],
         )
         monkeypatch.setattr(
-            "dataclaw.cli.load_config",
+            "codercrucible.cli.load_config",
             lambda: {"excluded_projects": []},
         )
         list_projects()
@@ -298,7 +298,7 @@ class TestListProjects:
         assert data[0]["name"] == "proj1"
 
     def test_no_projects(self, monkeypatch, capsys):
-        monkeypatch.setattr("dataclaw.cli.discover_projects", lambda claude_dir=None: [])
+        monkeypatch.setattr("codercrucible.cli.discover_projects", lambda claude_dir=None: [])
         list_projects()
         captured = capsys.readouterr()
         assert "No Claude Code sessions" in captured.out
@@ -336,7 +336,7 @@ class TestPushToHuggingface:
         mock_hfapi_cls = MagicMock(return_value=mock_api)
 
         # Patch the import inside push_to_huggingface
-        import dataclaw.cli as cli_mod
+        import codercrucible.cli as cli_mod
         monkeypatch.setattr(cli_mod, "push_to_huggingface", lambda *a, **kw: None)
 
         # Direct test with mock
@@ -357,9 +357,9 @@ class TestPushToHuggingface:
         with patch.dict("sys.modules", {"huggingface_hub": mock_hf_module}):
             # Need to reimport to pick up the mock
             import importlib
-            import dataclaw.cli
-            importlib.reload(dataclaw.cli)
+            import codercrucible.cli
+            importlib.reload(codercrucible.cli)
             with pytest.raises(SystemExit):
-                dataclaw.cli.push_to_huggingface(jsonl_path, "user/repo", {})
+                codercrucible.cli.push_to_huggingface(jsonl_path, "user/repo", {})
             # Reload again to restore
-            importlib.reload(dataclaw.cli)
+            importlib.reload(codercrucible.cli)

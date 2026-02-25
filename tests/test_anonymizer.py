@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from dataclaw.parser import AnonymizerWrapper, PassthroughAnonymizer
+from codercrucible.parser import AnonymizerWrapper, PassthroughAnonymizer
 
 
 class TestPassthroughAnonymizer:
@@ -32,7 +32,7 @@ class TestPassthroughAnonymizer:
 class TestAnonymizerWrapper:
     """Tests for AnonymizerWrapper that wraps scout.tools.AnonymizerTool."""
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_text_calls_tool(self, mock_tool_class):
         """Text should call the underlying tool."""
         mock_tool = MagicMock()
@@ -48,7 +48,7 @@ class TestAnonymizerWrapper:
         assert call_args["data"] == "original text"
         assert result == "anonymized_text"
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_path_calls_tool(self, mock_tool_class):
         """Path should call the underlying tool."""
         mock_tool = MagicMock()
@@ -64,7 +64,7 @@ class TestAnonymizerWrapper:
         assert call_args["data"] == "/Users/alice/project/file.py"
         assert result == "anonymized_path"
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_extra_usernames_passed(self, mock_tool_class):
         """Extra usernames should be passed to the tool."""
         mock_tool = MagicMock()
@@ -79,7 +79,7 @@ class TestAnonymizerWrapper:
         assert "github_user" in call_args["extra_usernames"]
         assert "discord_user" in call_args["extra_usernames"]
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_current_username_included(self, mock_tool_class):
         """Current system username should be included."""
         mock_tool = MagicMock()
@@ -95,7 +95,7 @@ class TestAnonymizerWrapper:
         current_user = os.path.basename(os.path.expanduser("~"))
         assert current_user in call_args["extra_usernames"]
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_usernames_deduplicated(self, mock_tool_class):
         """Usernames should be deduplicated."""
         mock_tool = MagicMock()
@@ -112,7 +112,7 @@ class TestAnonymizerWrapper:
         # Should have only one occurrence
         assert len(call_args["extra_usernames"]) == len(set(call_args["extra_usernames"]))
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_empty_string_handling(self, mock_tool_class):
         """Empty strings should be handled gracefully."""
         mock_tool = MagicMock()
@@ -125,7 +125,7 @@ class TestAnonymizerWrapper:
         result = wrapper.text("")
         assert result == ""
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_none_handling(self, mock_tool_class):
         """None inputs should return the original."""
         mock_tool = MagicMock()
@@ -138,7 +138,7 @@ class TestAnonymizerWrapper:
         result = wrapper.text(None)
         assert result is None
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_tool_error_fallback(self, mock_tool_class):
         """If tool fails, return original text."""
         mock_tool = MagicMock()
@@ -151,7 +151,7 @@ class TestAnonymizerWrapper:
         # Should return original on error
         assert result == "sensitive data"
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_path_error_fallback(self, mock_tool_class):
         """If tool fails on path, return original path."""
         mock_tool = MagicMock()
@@ -164,7 +164,7 @@ class TestAnonymizerWrapper:
         # Should return original on error
         assert result == "/Users/alice/secret.txt"
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_tool_returns_none_result(self, mock_tool_class):
         """If tool returns None result, return original."""
         mock_tool = MagicMock()
@@ -181,7 +181,7 @@ class TestAnonymizerWrapper:
 class TestAnonymizerWrapperIntegration:
     """Integration-style tests that verify the wrapper works with real scenarios."""
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_path_patterns(self, mock_tool_class):
         """Test various path patterns are passed correctly."""
         mock_tool = MagicMock()
@@ -201,7 +201,7 @@ class TestAnonymizerWrapperIntegration:
             call_args = mock_tool.run.call_args[0][0]
             assert call_args["data"] == path
 
-    @patch("dataclaw.parser.AnonymizerTool")
+    @patch("codercrucible.parser.AnonymizerTool")
     def test_text_with_special_chars(self, mock_tool_class):
         """Test text with special characters is handled."""
         mock_tool = MagicMock()

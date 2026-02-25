@@ -1,15 +1,15 @@
-"""Persistent config for DataClaw — stored at ~/.dataclaw/config.json"""
+"""Persistent config for CoderCrucible — stored at ~/.codercrucible/config.json"""
 
 import json
 import sys
 from pathlib import Path
 from typing import TypedDict
 
-CONFIG_DIR = Path.home() / ".dataclaw"
+CONFIG_DIR = Path.home() / ".codercrucible"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
-class DataClawConfig(TypedDict, total=False):
+class CoderCrucibleConfig(TypedDict, total=False):
     """Expected shape of the config dict."""
 
     repo: str | None
@@ -22,14 +22,14 @@ class DataClawConfig(TypedDict, total=False):
     search: dict | None  # Search config: {"max_content_length": int}
 
 
-DEFAULT_CONFIG: DataClawConfig = {
+DEFAULT_CONFIG: CoderCrucibleConfig = {
     "repo": None,
     "excluded_projects": [],
     "redact_strings": [],
 }
 
 
-def load_config() -> DataClawConfig:
+def load_config() -> CoderCrucibleConfig:
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE) as f:
@@ -40,7 +40,7 @@ def load_config() -> DataClawConfig:
     return dict(DEFAULT_CONFIG)
 
 
-def save_config(config: DataClawConfig) -> None:
+def save_config(config: CoderCrucibleConfig) -> None:
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w") as f:
