@@ -37,4 +37,4 @@ Issues = "https://github.com/banodoco/codercrucible/issues"
 codercrucible = "codercrucible.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-asyncio", "pytest-cov"]

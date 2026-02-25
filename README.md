@@ -103,10 +103,57 @@ codercrucible search "API error" --limit 10
 
 ### Semantic enrichment (experimental)
 
+The `think-cheap` command uses Groq's fast, affordable LLM (llama-3.1-8b-instant) to add semantic enrichments to your sessions:
+
+- **Intent classification** – Debug, feature, question, vent, exploration
+- **Emotional tags** – Frustration, excitement, confusion, relief, curiosity, etc.
+- **Security flags** – Potential secrets, hardcoded keys, infrastructure leaks
+
+#### Setup
+
+1. Get a free Groq API key at [console.groq.com](https://console.groq.com/keys)
+2. Configure it (either via environment variable or config):
+
 ```bash
-# Enrich sessions with intent/emotion tags (requires Groq API key)
-codercrucible think-cheap --dimensions intent,emotional
+# Option 1: Set via environment variable
+export GROQ_API_KEY=gsk_...
+
+# Option 2: Save to config
+codercrucible config --groq-key gsk_...
 ```
+
+#### Model Configuration
+
+The default model is `llama-3.1-8b-instant`. You can customize it:
+
+```bash
+# Option 1: Set via environment variable (applies to all enrichments)
+export ENRICHMENT_MODEL=llama-3.1-70b-versatile
+
+# Option 2: Save default to config
+codercrucible config --set-default-enrichment-model llama-3.1-70b-versatile
+```
+
+#### Usage
+
+```bash
+# Enrich sessions with all three dimensions
+codercrucible think-cheap --input sessions.jsonl --output enriched.jsonl
+
+# Specify only specific dimensions
+codercrucible think-cheap --input sessions.jsonl --output enriched.jsonl --dimensions intent,emotional
+
+# Limit number of sessions to process
+codercrucible think-cheap --input sessions.jsonl --output enriched.jsonl --limit 100
+
+# Set a budget limit (in USD) to control costs
+codercrucible think-cheap --input sessions.jsonl --output enriched.jsonl --budget 0.50
+
+# Use a different model
+codercrucible think-cheap --input sessions.jsonl --output enriched.jsonl --model llama-3.1-70b-versatile
+```
+
+**Cost estimate**: ~$0.001 per session per dimension (very cheap with Groq!)
 
 ---
 
