@@ -2,7 +2,7 @@
 
 import pytest
 
-from dataclaw.anonymizer import Anonymizer
+from dataclaw.parser import AnonymizerWrapper
 
 
 @pytest.fixture
@@ -49,12 +49,8 @@ def sample_assistant_entry():
 
 @pytest.fixture
 def mock_anonymizer(monkeypatch):
-    """Anonymizer with patched _detect_home_dir returning deterministic values."""
-    monkeypatch.setattr(
-        "dataclaw.anonymizer._detect_home_dir",
-        lambda: ("/Users/testuser", "testuser"),
-    )
-    return Anonymizer()
+    """AnonymizerWrapper with extra_usernames set to testuser for deterministic testing."""
+    return AnonymizerWrapper(extra_usernames=["testuser"])
 
 
 @pytest.fixture

@@ -400,21 +400,23 @@ class TestDiscoverProjects:
             '{"type":"assistant","timestamp":1706000001000,"message":{"model":"m","content":[{"type":"text","text":"Hey"}],"usage":{"input_tokens":1,"output_tokens":1}}}\n'
         )
 
-        monkeypatch.setattr("dataclaw.parser.PROJECTS_DIR", projects_dir)
+        monkeypatch.setattr("dataclaw.parser.get_claude_dir", lambda: tmp_path)
         projects = discover_projects()
         assert len(projects) == 1
         assert projects[0]["display_name"] == "myapp"
         assert projects[0]["session_count"] == 1
 
     def test_no_projects_dir(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("dataclaw.parser.PROJECTS_DIR", tmp_path / "nonexistent")
+        def fake_claude_dir():
+            return tmp_path / "nonexistent"
+        monkeypatch.setattr("dataclaw.parser.get_claude_dir", fake_claude_dir)
         assert discover_projects() == []
 
     def test_empty_project_dir(self, tmp_path, monkeypatch):
         projects_dir = tmp_path / "projects"
         proj = projects_dir / "empty-project"
         proj.mkdir(parents=True)
-        monkeypatch.setattr("dataclaw.parser.PROJECTS_DIR", projects_dir)
+        monkeypatch.setattr("dataclaw.parser.get_claude_dir", lambda: tmp_path)
         assert discover_projects() == []
 
     def test_parse_project_sessions(self, tmp_path, monkeypatch, mock_anonymizer):
@@ -428,11 +430,11 @@ class TestDiscoverProjects:
             '{"type":"assistant","timestamp":1706000001000,"message":{"model":"m","content":[{"type":"text","text":"Hi"}],"usage":{"input_tokens":1,"output_tokens":1}}}\n'
         )
 
-        monkeypatch.setattr("dataclaw.parser.PROJECTS_DIR", projects_dir)
+        monkeypatch.setattr("dataclaw.parser.get_claude_dir", lambda: tmp_path)
         sessions = parse_project_sessions("test-project", mock_anonymizer)
         assert len(sessions) == 1
         assert sessions[0]["project"] == "test-project"
 
     def test_parse_nonexistent_project(self, tmp_path, monkeypatch, mock_anonymizer):
-        monkeypatch.setattr("dataclaw.parser.PROJECTS_DIR", tmp_path / "projects")
+        monkeypatch.setattr("dataclaw.parser.get_claude_dir", lambda: tmp_path / "projects")
         assert parse_project_sessions("nope", mock_anonymizer) == []

@@ -2,15 +2,17 @@
 
 import argparse
 import json
+import os
 import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .anonymizer import Anonymizer
+from .parser import AnonymizerWrapper
 from .config import CONFIG_FILE, DataClawConfig, load_config, save_config
 from .parser import CLAUDE_DIR, discover_projects, parse_project_sessions
 from .secrets import redact_session
+from .search import SEARCH_DB_PATH, build_index, search as do_search, get_index_stats
 
 HF_TAG = "dataclaw"
 REPO_URL = "https://github.com/banodoco/dataclaw"
@@ -198,7 +200,7 @@ def configure(
 def export_to_jsonl(
     selected_projects: list[dict],
     output_path: Path,
-    anonymizer: Anonymizer,
+    anonymizer: AnonymizerWrapper,
     include_thinking: bool = True,
     custom_strings: list[str] | None = None,
 ) -> dict:
@@ -653,6 +655,12 @@ def prep() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="DataClaw — Claude Code -> Hugging Face")
+    parser.add_argument(
+        "--claude-dir", 
+        type=Path, 
+        default=None,
+        help="Path to Claude Code directory (default: ~/.claude or CLAUDE_DIR env var)"
+    )
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("prep", help="Data prep — discover projects, detect HF, output JSON")
@@ -683,8 +691,26 @@ def main() -> None:
         target.add_argument("--no-thinking", action="store_true")
         target.add_argument("--no-push", action="store_true")
 
+    # Search subcommands
+    idx = sub.add_parser("index", help="Build search index from Claude Code sessions")
+    idx.add_argument("--projects", type=str, help="Comma-separated projects to index (default: all)")
+    idx.add_argument("--force", action="store_true", help="Rebuild index from scratch")
+
+    sch = sub.add_parser("search", help="Search indexed sessions")
+    sch.add_argument("query", type=str, help="Search query string")
+    sch.add_argument("--limit", "-n", type=int, default=20, help="Max results (default: 20)")
+    sch.add_argument("--min-confidence", "-c", type=int, default=0,
+                     help="Minimum confidence score 0-100 (default: 0)")
+
     args = parser.parse_args()
     command = args.command or "export"
+
+    # Handle --claude-dir option by setting environment variable
+    if args.claude_dir:
+        if not args.claude_dir.exists():
+            print(f"Error: --claude-dir path does not exist: {args.claude_dir}")
+            sys.exit(1)
+        os.environ["CLAUDE_DIR"] = str(args.claude_dir.resolve())
 
     if command == "prep":
         prep()
@@ -710,6 +736,14 @@ def main() -> None:
         _handle_config(args)
         return
 
+    if command == "index":
+        _handle_index(args)
+        return
+
+    if command == "search":
+        _handle_search(args)
+        return
+
     _run_export(args)
 
 
@@ -732,6 +766,83 @@ def _handle_config(args) -> None:
         redact_usernames=_parse_csv_arg(args.redact_usernames),
         confirm_projects=args.confirm_projects or bool(args.exclude),
     )
+
+
+def _handle_index(args) -> None:
+    """Handle the index subcommand - build search index."""
+    projects = None
+    if args.projects:
+        projects = _parse_csv_arg(args.projects)
+    
+    print("=" * 50)
+    print("  DataClaw — Building Search Index")
+    print("=" * 50)
+    
+    if not CLAUDE_DIR.exists():
+        print(f"Error: {CLAUDE_DIR} not found. Is Claude Code installed?")
+        sys.exit(1)
+    
+    result = build_index(projects=projects, force=args.force)
+    
+    if "error" in result and result["document_count"] == 0:
+        print(f"Error: {result.get('error')}")
+        if "available_projects" in result:
+            print(f"Available projects: {', '.join(result['available_projects'])}")
+        sys.exit(1)
+    
+    print(f"\nIndexed {result['document_count']} sessions from {len(result['projects_indexed'])} projects")
+    print(f"Index stored at: {result.get('index_path', SEARCH_DB_PATH)}")
+    
+    if result.get("errors"):
+        print(f"\nWarnings:")
+        for err in result["errors"]:
+            print(f"  - {err}")
+    
+    print(json.dumps({
+        "stage": "indexed",
+        "document_count": result["document_count"],
+        "projects_indexed": result["projects_indexed"],
+        "index_path": result.get("index_path"),
+        "next_steps": [
+            "Search your conversations: dataclaw search \"your query\"",
+            "Re-index after new sessions: dataclaw index",
+        ],
+        "next_command": None,
+    }, indent=2))
+
+
+def _handle_search(args) -> None:
+    """Handle the search subcommand - search indexed sessions."""
+    print("=" * 50)
+    print(f"  Searching: {args.query}")
+    print("=" * 50)
+    
+    results = do_search(args.query, limit=args.limit, min_confidence=args.min_confidence)
+    
+    if not results:
+        print("No results found. Try:")
+        print("  - Building the index: dataclaw index")
+        print("  - Using different search terms")
+        print("  - Lowering min-confidence: dataclaw search \"query\" --min-confidence 10")
+        print(json.dumps({"results": [], "count": 0}, indent=2))
+        return
+    
+    # Print results as a table
+    print(f"\nFound {len(results)} results:\n")
+    print(f"{'Session ID':<30} {'Project':<20} {'Confidence':>10} {'Preview'}")
+    print("-" * 100)
+    
+    for r in results:
+        preview = r.get("snippet", "")[:50].replace("\n", " ")
+        print(f"{r['id'][:28]:<30} {r['project'][:18]:<20} {r['confidence']:>8}% {preview}...")
+    
+    # Also output JSON for programmatic use
+    print("\n---DATACLAW_JSON---")
+    print(json.dumps({
+        "query": args.query,
+        "results": results,
+        "count": len(results),
+    }, indent=2))
 
 
 def _run_export(args) -> None:
@@ -800,7 +911,7 @@ def _run_export(args) -> None:
 
     # Build anonymizer with extra usernames from config
     extra_usernames = config.get("redact_usernames", [])
-    anonymizer = Anonymizer(extra_usernames=extra_usernames)
+    anonymizer = AnonymizerWrapper(extra_usernames=extra_usernames)
 
     # Custom strings to redact
     custom_strings = config.get("redact_strings", [])

@@ -77,6 +77,77 @@ dataclaw export
 | `dataclaw export --all-projects` | Include everything (ignore exclusions) |
 | `dataclaw export --no-thinking` | Exclude extended thinking blocks |
 | `dataclaw update-skill claude` | Install/update the dataclaw skill for Claude Code |
+| `dataclaw index` | Build search index from Claude Code sessions |
+| `dataclaw search "query"` | Search indexed sessions with BM25 ranking |
+
+</details>
+
+<details>
+<summary><b>Local Search</b></summary>
+
+DataClaw can index your Claude Code conversations for fast, offline search using BM25 ranking with confidence scores.
+
+### Quick Start
+
+```bash
+# First, build the index (one-time or after new sessions)
+dataclaw index
+
+# Or specify a custom Claude Code directory
+dataclaw index --claude-dir /path/to/claude/data
+
+# Then search your conversations
+dataclaw search "authentication bug"
+dataclaw search "API error" --limit 10
+dataclaw search "refactor" --min-confidence 50
+```
+
+### Search Commands
+
+| Command | Description |
+|---------|-------------|
+| `dataclaw index` | Scan all projects and build search index |
+| `dataclaw index --force` | Rebuild index from scratch |
+| `dataclaw index --projects "proj1,proj2"` | Index specific projects only |
+| `dataclaw index --claude-dir /path/to/.claude` | Use a custom Claude Code directory |
+| `dataclaw search "query"` | Search with BM25 ranking |
+| `dataclaw search "query" --limit 10` | Limit results |
+| `dataclaw search "query" --min-confidence 50` | Filter by confidence |
+
+### Specifying Claude Code Directory
+
+By default, DataClaw looks for Claude Code sessions in `~/.claude`. You can override this:
+
+```bash
+# Using CLI flag (any command)
+dataclaw index --claude-dir /path/to/claude/data
+
+# Using environment variable
+export CLAUDE_DIR=/path/to/claude/data
+dataclaw index
+```
+
+This is useful for:
+- Indexing sessions from another machine
+- Using a custom Claude Code data location
+- Testing with sample data
+
+### How It Works
+
+- The index is stored in `~/.dataclaw/search.db`
+- Search uses BM25 ranking for relevance
+- Confidence scores (0-100) indicate match quality
+- Snippets show context around search terms
+
+### Requirements
+
+Local search requires scout-core:
+
+```bash
+pip install scout-core
+# Or for local development:
+pip install -e ../scout
+```
 
 </details>
 
@@ -97,13 +168,15 @@ dataclaw export
 
 DataClaw applies multiple layers of protection:
 
-1. **Path anonymization** — File paths stripped to project-relative
-2. **Username hashing** — Your macOS username + any configured usernames replaced with stable hashes
+1. **Path anonymization** — File paths stripped to project-relative (powered by scout-core)
+2. **Username hashing** — Your macOS username + any configured usernames replaced with stable hashes (powered by scout-core)
 3. **Secret detection** — Regex patterns catch JWT tokens, API keys (Anthropic, OpenAI, HF, GitHub, AWS, etc.), database passwords, private keys, Discord webhooks, and more
 4. **Entropy analysis** — Long high-entropy strings in quotes are flagged as potential secrets
 5. **Email redaction** — Personal email addresses removed
 6. **Custom redaction** — You can configure additional strings and usernames to redact
 7. **Tool input pre-redaction** — Secrets in tool inputs are redacted BEFORE truncation to prevent partial leaks
+
+> **Note:** Username and path anonymization is powered by scout-core. Audit logs for anonymization are stored in `~/.scout/audit.jsonl`.
 
 **This is NOT foolproof.** Always review your exported data before publishing.
 Automated redaction cannot catch everything — especially service-specific

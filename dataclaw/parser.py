@@ -1,27 +1,90 @@
 """Parse Claude Code session JSONL files into structured conversations."""
 
+from __future__ import annotations
+
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .anonymizer import Anonymizer
+from scout.tools import AnonymizerTool
+
 from .secrets import redact_text
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_DIR = Path.home() / ".claude"
+
+class AnonymizerWrapper:
+    """Wrapper around Scout AnonymizerTool that provides the same interface as the old AnonymizerWrapper."""
+
+    def __init__(self, extra_usernames: list[str] | None = None):
+        self._tool = AnonymizerTool()
+        # Always include the current system username
+        self._current_username = os.path.basename(os.path.expanduser("~"))
+        self._extra_usernames = extra_usernames or []
+
+    def _get_all_usernames(self) -> list[str]:
+        """Combine current username with extra usernames."""
+        usernames = list(self._extra_usernames)
+        if self._current_username and self._current_username not in usernames:
+            usernames.append(self._current_username)
+        return usernames
+
+    def text(self, content: str) -> str:
+        if not content:
+            return content
+        usernames = self._get_all_usernames()
+        result = self._tool.run({
+            "mode": "text",
+            "data": content,
+            "extra_usernames": usernames,
+        })
+        return result.get("result", content)
+
+    def path(self, file_path: str) -> str:
+        if not file_path:
+            return file_path
+        usernames = self._get_all_usernames()
+        result = self._tool.run({
+            "mode": "path",
+            "data": file_path,
+            "extra_usernames": usernames,
+        })
+        return result.get("result", file_path)
+
+# Claude Code directory - can be overridden via CLAUDE_DIR environment variable
+# or by passing a custom path to functions that need it
+_DEFAULT_CLAUDE_DIR = Path.home() / ".claude"
+
+def get_claude_dir() -> Path:
+    """Get the Claude Code directory, respecting CLAUDE_DIR environment variable."""
+    env_path = os.environ.get("CLAUDE_DIR")
+    if env_path:
+        return Path(env_path)
+    return _DEFAULT_CLAUDE_DIR
+
+# For backward compatibility - but code should use get_claude_dir() instead
+CLAUDE_DIR = _DEFAULT_CLAUDE_DIR
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 
-def discover_projects() -> list[dict]:
-    """Discover all Claude Code projects with session counts."""
-    if not PROJECTS_DIR.exists():
+def discover_projects(claude_dir: Path | None = None) -> list[dict]:
+    """Discover all Claude Code projects with session counts.
+    
+    Args:
+        claude_dir: Optional path to Claude Code directory. 
+                   Defaults to CLAUDE_DIR env var or ~/.claude
+    """
+    base_dir = claude_dir or get_claude_dir()
+    projects_dir = base_dir / "projects"
+    
+    if not projects_dir.exists():
         return []
 
     projects = []
-    for project_dir in sorted(PROJECTS_DIR.iterdir()):
+    for project_dir in sorted(projects_dir.iterdir()):
         if not project_dir.is_dir():
             continue
         sessions = list(project_dir.glob("*.jsonl"))
@@ -40,11 +103,20 @@ def discover_projects() -> list[dict]:
 
 def parse_project_sessions(
     project_dir_name: str,
-    anonymizer: Anonymizer,
+    anonymizer: AnonymizerWrapper,
     include_thinking: bool = True,
+    claude_dir: Path | None = None,
 ) -> list[dict]:
-    """Parse all sessions for a project into structured dicts."""
-    project_path = PROJECTS_DIR / project_dir_name
+    """Parse all sessions for a project into structured dicts.
+    
+    Args:
+        project_dir_name: Name of the project directory
+        anonymizer: AnonymizerWrapper instance
+        include_thinking: Whether to include thinking blocks
+        claude_dir: Optional path to Claude Code directory
+    """
+    base_dir = claude_dir or get_claude_dir()
+    project_path = base_dir / "projects" / project_dir_name
     if not project_path.exists():
         return []
 
@@ -58,7 +130,7 @@ def parse_project_sessions(
 
 
 def _parse_session_file(
-    filepath: Path, anonymizer: Anonymizer, include_thinking: bool = True
+    filepath: Path, anonymizer: AnonymizerWrapper, include_thinking: bool = True
 ) -> dict | None:
     messages = []
     metadata = {
@@ -117,7 +189,7 @@ def _process_entry(
     messages: list[dict[str, Any]],
     metadata: dict[str, Any],
     stats: dict[str, int],
-    anonymizer: Anonymizer,
+    anonymizer: AnonymizerWrapper,
     include_thinking: bool,
 ) -> None:
     entry_type = entry.get("type")
@@ -154,7 +226,7 @@ def _process_entry(
             metadata["end_time"] = timestamp
 
 
-def _extract_user_content(entry: dict[str, Any], anonymizer: Anonymizer) -> str | None:
+def _extract_user_content(entry: dict[str, Any], anonymizer: AnonymizerWrapper) -> str | None:
     msg_data = entry.get("message", {})
     content = msg_data.get("content", "")
     if isinstance(content, list):
@@ -166,7 +238,7 @@ def _extract_user_content(entry: dict[str, Any], anonymizer: Anonymizer) -> str 
 
 
 def _extract_assistant_content(
-    entry: dict[str, Any], anonymizer: Anonymizer, include_thinking: bool,
+    entry: dict[str, Any], anonymizer: AnonymizerWrapper, include_thinking: bool,
 ) -> dict[str, Any] | None:
     msg_data = entry.get("message", {})
     content_blocks = msg_data.get("content", [])
@@ -211,13 +283,13 @@ def _extract_assistant_content(
 MAX_TOOL_INPUT_LENGTH = 300
 
 
-def _redact_and_truncate(text: str, anonymizer: Anonymizer) -> str:
+def _redact_and_truncate(text: str, anonymizer: AnonymizerWrapper) -> str:
     """Redact secrets BEFORE truncating to avoid partial secret leaks."""
     text, _ = redact_text(text)
     return anonymizer.text(text[:MAX_TOOL_INPUT_LENGTH])
 
 
-def _summarize_tool_input(tool_name: str | None, input_data: Any, anonymizer: Anonymizer) -> str:
+def _summarize_tool_input(tool_name: str | None, input_data: Any, anonymizer: AnonymizerWrapper) -> str:
     """Summarize tool input for export."""
     if not isinstance(input_data, dict):
         return _redact_and_truncate(str(input_data), anonymizer)
