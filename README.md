@@ -207,3 +207,5 @@ Our immediate roadmap:
 This fork is released under the **MIT License**, same as the original CoderCrucible. All contributed data remains the property of the contributors; we only provide the tool.
 
 ---
+
+oh yeah almost forgot to mention.. this is obviously perfromance art. and remember "art is like porn - i know it when i see it"
