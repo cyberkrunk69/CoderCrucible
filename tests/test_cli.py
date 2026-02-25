@@ -363,3 +363,137 @@ class TestPushToHuggingface:
                 codercrucible.cli.push_to_huggingface(jsonl_path, "user/repo", {})
             # Reload again to restore
             importlib.reload(codercrucible.cli)
+
+
+class TestCursorExport:
+    """Tests for Cursor export functionality."""
+
+    def test_run_cursor_export_no_sessions(self, tmp_path, monkeypatch):
+        """Test Cursor export with no sessions found."""
+        from codercrucible.parsers.cursor import CursorParser
+        
+        # Mock the parser
+        mock_parser = MagicMock(spec=CursorParser)
+        mock_parser.discover.return_value = []
+        
+        with patch("codercrucible.cli.create_parser", return_value=mock_parser):
+            with patch("codercrucible.cli.load_config", return_value={}):
+                with patch("codercrucible.cli.save_config"):
+                    # Create mock args
+                    args = MagicMock()
+                    args.output = tmp_path / "output.jsonl"
+                    args.no_push = True
+                    args.repo = None
+                    
+                    from codercrucible.cli import _run_cursor_export
+                    
+                    with pytest.raises(SystemExit) as exc_info:
+                        _run_cursor_export(args)
+                    
+                    assert exc_info.value.code == 1
+
+    def test_run_cursor_export_with_sessions(self, tmp_path, monkeypatch):
+        """Test Cursor export with sessions."""
+        from codercrucible.parsers.cursor import CursorParser
+        
+        # Mock the parser
+        mock_parser = MagicMock(spec=CursorParser)
+        mock_parser.discover.return_value = [
+            {"session_id": "session-1", "timestamp": "2024-01-15T10:00:00Z"},
+        ]
+        mock_parser.parse.return_value = {
+            "session_id": "session-1",
+            "model": "claude-3-opus",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stats": {"user_messages": 1, "assistant_messages": 0, "tool_uses": 0},
+        }
+        
+        config = {"redact_strings": []}
+        
+        with patch("codercrucible.cli.create_parser", return_value=mock_parser):
+            with patch("codercrucible.cli.load_config", return_value=config):
+                with patch("codercrucible.cli.save_config"):
+                    with patch("codercrucible.cli.redact_session", return_value=(mock_parser.parse.return_value, 0)):
+                        args = MagicMock()
+                        args.output = tmp_path / "output.jsonl"
+                        args.no_push = True
+                        args.repo = None
+                        
+                        from codercrucible.cli import _run_cursor_export
+                        
+                        # Should not raise
+                        _run_cursor_export(args)
+                        
+                        # Verify output file was created
+                        output_file = tmp_path / "output.jsonl"
+                        assert output_file.exists()
+                        
+                        # Verify content
+                        content = output_file.read_text()
+                        assert "session-1" in content
+
+    def test_run_cursor_export_skips_invalid_sessions(self, tmp_path, monkeypatch):
+        """Test that Cursor export skips sessions without valid model."""
+        from codercrucible.parsers.cursor import CursorParser
+        
+        # Mock the parser
+        mock_parser = MagicMock(spec=CursorParser)
+        mock_parser.discover.return_value = [
+            {"session_id": "session-no-model"},
+            {"session_id": "session-with-model"},
+        ]
+        mock_parser.parse.side_effect = [
+            None,  # First session returns None
+            {  # Second session is valid
+                "session_id": "session-with-model",
+                "model": "claude-3-opus",
+                "messages": [],
+                "stats": {"user_messages": 0, "assistant_messages": 0, "tool_uses": 0},
+            },
+        ]
+        
+        config = {"redact_strings": []}
+        
+        with patch("codercrucible.cli.create_parser", return_value=mock_parser):
+            with patch("codercrucible.cli.load_config", return_value=config):
+                with patch("codercrucible.cli.save_config"):
+                    with patch("codercrucible.cli.redact_session", side_effect=lambda x, **kw: (x, 0)):
+                        args = MagicMock()
+                        args.output = tmp_path / "output.jsonl"
+                        args.no_push = True
+                        args.repo = None
+                        
+                        from codercrucible.cli import _run_cursor_export
+                        
+                        _run_cursor_export(args)
+                        
+                        # Should have called parse twice (one skipped)
+                        assert mock_parser.parse.call_count == 2
+
+
+class TestCLIExportArgumentParsing:
+    """Tests for CLI export argument parsing."""
+
+    def test_export_command_has_agent_argument(self):
+        """Test that export command accepts --agent argument."""
+        import argparse
+        from codercrucible.cli import main
+        
+        # Create a parser the same way main() does
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="command")
+        exp = sub.add_parser("export")
+        exp.add_argument(
+            "--agent", "-a",
+            type=str,
+            default="claude-code",
+            choices=["claude-code", "cursor"],
+        )
+        
+        # Parse with cursor agent
+        args = parser.parse_args(["export", "--agent", "cursor"])
+        assert args.agent == "cursor"
+        
+        # Parse with default
+        args = parser.parse_args(["export"])
+        assert args.agent == "claude-code"
