@@ -210,6 +210,43 @@ def list_projects(claude_dir: Path | None = None) -> None:
     ))
 
 
+def discover_sessions(agent: str = "cursor", limit: int | None = None) -> None:
+    """Discover sessions from various AI coding agents.
+    
+    Args:
+        agent: Agent name (cursor, claude-code)
+        limit: Optional limit on number of sessions to return
+    """
+    from codercrucible.parsers import create_parser, list_available_parsers
+    
+    available = list_available_parsers()
+    if agent not in available:
+        print(json.dumps({
+            "error": f"Unknown agent: {agent}",
+            "available_agents": available,
+        }))
+        return
+    
+    parser = create_parser(agent)
+    if parser is None:
+        print(json.dumps({
+            "error": f"Failed to create parser for agent: {agent}",
+        }))
+        return
+    
+    print(f"Discovering sessions from {agent}...", file=sys.stderr)
+    sessions = parser.discover()
+    
+    if limit:
+        sessions = sessions[:limit]
+    
+    print(json.dumps({
+        "agent": agent,
+        "total_sessions": len(sessions),
+        "sessions": sessions,
+    }, indent=2))
+
+
 def _merge_config_list(config: CoderCrucibleConfig, key: str, new_values: list[str]) -> None:
     """Append new_values to a config list (deduplicated, sorted)."""
     existing = set(config.get(key, []))
@@ -716,6 +753,22 @@ def main() -> None:
     cf.add_argument("--file", "-f", type=Path, default=None, help="Path to export JSONL file")
     sub.add_parser("list", help="List all projects")
 
+    # Discover command for agent parsers
+    disc = sub.add_parser("discover", help="Discover sessions from various AI coding agents")
+    disc.add_argument(
+        "--agent", "-a",
+        type=str,
+        default="cursor",
+        choices=["cursor", "claude-code"],
+        help="Agent to discover sessions from (default: cursor)"
+    )
+    disc.add_argument(
+        "--limit", "-n",
+        type=int,
+        default=None,
+        help="Limit number of sessions to discover"
+    )
+
     us = sub.add_parser("update-skill", help="Install/update the codercrucible skill for a coding agent")
     us.add_argument("target", choices=["claude"], help="Agent to install skill for")
 
@@ -797,6 +850,10 @@ def main() -> None:
 
     if command == "list":
         list_projects(claude_dir=claude_dir)
+        return
+
+    if command == "discover":
+        discover_sessions(agent=args.agent, limit=args.limit)
         return
 
     if command == "config":
