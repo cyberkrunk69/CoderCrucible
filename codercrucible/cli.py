@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .parser import AnonymizerWrapper, CLAUDE_DIR
 from .parsers import create_parser, list_available_parsers
-from .config import CONFIG_FILE, CoderCrucibleConfig, load_config, save_config, get_groq_api_key
+from .config import CONFIG_FILE, CoderCrucibleConfig, load_config, save_config, get_groq_api_key, COST_PER_SESSION, get_enrichment_model
 
 # Re-export for backward compatibility with tests
 from .parser import discover_projects, parse_project_sessions
@@ -260,6 +260,8 @@ def configure(
     redact: list[str] | None = None,
     redact_usernames: list[str] | None = None,
     confirm_projects: bool = False,
+    groq_key: str | None = None,
+    default_enrichment_model: str | None = None,
 ):
     """Set config values non-interactively. Lists are MERGED (append), not replaced."""
     config = load_config()
@@ -273,6 +275,10 @@ def configure(
         _merge_config_list(config, "redact_usernames", redact_usernames)
     if confirm_projects:
         config["projects_confirmed"] = True
+    if groq_key is not None:
+        config["groq_api_key"] = groq_key
+    if default_enrichment_model is not None:
+        config["default_enrichment_model"] = default_enrichment_model
     save_config(config)
     print(f"Config saved to {CONFIG_FILE}")
     print(json.dumps(_mask_config_for_display(config), indent=2))
@@ -781,8 +787,19 @@ def main() -> None:
                      help="Comma-separated usernames to anonymize (GitHub handles, Discord names)")
     cfg.add_argument("--confirm-projects", action="store_true",
                      help="Mark project selection as confirmed (include all)")
+    cfg.add_argument("--groq-key", type=str, dest="groq_key",
+                     help="Set Groq API key for enrichment commands")
+    cfg.add_argument("--set-default-enrichment-model", type=str, dest="default_enrichment_model",
+                     help="Set default model for think-cheap command (e.g., llama-3.1-8b-instant)")
 
     exp = sub.add_parser("export", help="Export and push (default)")
+    exp.add_argument(
+        "--agent", "-a",
+        type=str,
+        default="claude-code",
+        choices=["claude-code", "cursor"],
+        help="Agent to export sessions from (default: claude-code)"
+    )
     # Export flags on both the subcommand and root parser so `codercrucible --no-push` works
     for target in (exp, parser):
         target.add_argument("--output", "-o", type=Path, default=None)
@@ -809,8 +826,8 @@ def main() -> None:
                     help="Max sessions to process (0 for no limit, default: 0)")
     tc.add_argument("--budget", type=float, default=0.50,
                     help="Max cost in USD (default: 0.50)")
-    tc.add_argument("--model", type=str, default="llama-3.1-8b-instant",
-                    help="LLM model to use (default: llama-3.1-8b-instant)")
+    tc.add_argument("--model", type=str, default=None,
+                    help="LLM model to use (default: llama-3.1-8b-instant or ENRICHMENT_MODEL env var)")
 
     sch = sub.add_parser("search", help="Search indexed sessions")
     sch.add_argument("query", type=str, help="Search query string")
@@ -883,7 +900,7 @@ def _parse_csv_arg(value: str | None) -> list[str] | None:
 
 def _handle_config(args) -> None:
     """Handle the config subcommand."""
-    has_changes = args.repo or args.exclude or args.redact or args.redact_usernames or args.confirm_projects
+    has_changes = args.repo or args.exclude or args.redact or args.redact_usernames or args.confirm_projects or args.groq_key or args.default_enrichment_model
     if not has_changes:
         print(json.dumps(_mask_config_for_display(load_config()), indent=2))
         return
@@ -893,6 +910,8 @@ def _handle_config(args) -> None:
         redact=_parse_csv_arg(args.redact),
         redact_usernames=_parse_csv_arg(args.redact_usernames),
         confirm_projects=args.confirm_projects or bool(args.exclude),
+        groq_key=args.groq_key,
+        default_enrichment_model=args.default_enrichment_model,
     )
 
 
@@ -959,6 +978,9 @@ def _handle_think_cheap(args) -> None:
         print(json.dumps({"error": "At least one dimension must be specified"}, indent=2))
         sys.exit(1)
 
+    # Resolve model: CLI arg > env var > config > default
+    model = args.model if args.model else get_enrichment_model()
+
     # Validate input file
     input_path = Path(args.input)
     if not input_path.exists():
@@ -993,7 +1015,7 @@ def _handle_think_cheap(args) -> None:
     print(f"Input: {input_path}")
     print(f"Sessions: {len(sessions)}")
     print(f"Dimensions: {', '.join(dimensions)}")
-    print(f"Model: {args.model}")
+    print(f"Model: {model}")
     print(f"Budget: ${args.budget:.2f}")
     print()
 
@@ -1026,7 +1048,7 @@ def _handle_think_cheap(args) -> None:
     llm_call = create_llm_call()
     orchestrator = EnrichmentOrchestrator(
         llm_call=llm_call,
-        model=args.model,
+        model=model,
         audit_logging=True,
     )
 
@@ -1055,8 +1077,8 @@ def _handle_think_cheap(args) -> None:
             )
             enriched_sessions.extend(enriched)
 
-            # Track approximate cost (this is a rough estimate)
-            total_cost += len(batch) * len(dimensions) * 0.001  # Rough estimate
+            # Track approximate cost using centralized cost constant
+            total_cost += len(batch) * len(dimensions) * COST_PER_SESSION
 
         return enriched_sessions
 
@@ -1083,7 +1105,7 @@ def _handle_think_cheap(args) -> None:
         "sessions_enriched": len(enriched_sessions),
         "output_file": str(output_path),
         "dimensions": dimensions,
-        "model": args.model,
+        "model": model,
         "estimated_cost_usd": total_cost,
         "next_steps": [
             "Search enriched sessions: codercrucible search \"your query\"",
@@ -1146,6 +1168,19 @@ def _handle_search(args) -> None:
 
 def _run_export(args) -> None:
     """Run the export flow — discover, anonymize, export, optionally push."""
+    # Handle different agent types
+    agent = getattr(args, 'agent', 'claude-code')
+    
+    if agent == "cursor":
+        _run_cursor_export(args)
+        return
+    
+    # Original Claude Code export flow
+    _run_claude_export(args)
+
+
+def _run_claude_export(args) -> None:
+    """Run the export flow for Claude Code sessions."""
     # Gate: require `codercrucible confirm` before pushing
     if not args.no_push:
         config = load_config()
@@ -1156,6 +1191,271 @@ def _run_export(args) -> None:
                 "next_command": "codercrucible confirm",
             }, indent=2))
             sys.exit(1)
+
+    print("=" * 50)
+    print("  CoderCrucible — Claude Code Log Exporter")
+    print("=" * 50)
+
+    if not CLAUDE_DIR.exists():
+        print(f"Error: {CLAUDE_DIR} not found. Is Claude Code installed?", file=sys.stderr)
+        sys.exit(1)
+
+    projects = _discover_projects()
+    if not projects:
+        print("No Claude Code sessions found.", file=sys.stderr)
+        sys.exit(1)
+
+    config = load_config()
+
+    total_sessions = sum(p["session_count"] for p in projects)
+    total_size = sum(p["total_size_bytes"] for p in projects)
+    print(f"\nFound {total_sessions} sessions across {len(projects)} projects "
+          f"({_format_size(total_size)} raw)")
+
+    # Resolve repo — CLI flag > config > auto-detect from HF username
+    repo_id = args.repo or config.get("repo")
+    if not repo_id and not args.no_push:
+        hf_user = get_hf_username()
+        if hf_user:
+            repo_id = default_repo_name(hf_user)
+            print(f"\nAuto-detected HF repo: {repo_id}")
+            config["repo"] = repo_id
+            save_config(config)
+
+    # Apply exclusions
+    excluded = set(config.get("excluded_projects", []))
+    if args.all_projects:
+        excluded = set()
+
+    included = [p for p in projects if p["display_name"] not in excluded]
+    excluded_projects = [p for p in projects if p["display_name"] in excluded]
+
+    if excluded_projects:
+        print(f"\nIncluding {len(included)} projects (excluding {len(excluded_projects)}):")
+    else:
+        print(f"\nIncluding all {len(included)} projects:")
+    for p in included:
+        print(f"  + {p['display_name']} ({p['session_count']} sessions)")
+    for p in excluded_projects:
+        print(f"  - {p['display_name']} (excluded)")
+
+    if not included:
+        print("\nNo projects to export. Run: codercrucible config --exclude ''")
+        sys.exit(1)
+
+    # Build anonymizer with extra usernames from config
+    extra_usernames = config.get("redact_usernames", [])
+    anonymizer = AnonymizerWrapper(extra_usernames=extra_usernames)
+
+    # Custom strings to redact
+    custom_strings = config.get("redact_strings", [])
+
+    if extra_usernames:
+        print(f"\nAnonymizing usernames: {', '.join(extra_usernames)}")
+    if custom_strings:
+        print(f"Redacting custom strings: {len(custom_strings)} configured")
+
+    # Export
+    output_path = args.output or Path("codercrucible_conversations.jsonl")
+
+    print(f"\nExporting to {output_path}...")
+    meta = export_to_jsonl(
+        included, output_path, anonymizer, not args.no_thinking,
+        custom_strings=custom_strings,
+    )
+    file_size = output_path.stat().st_size
+    print(f"\nExported {meta['sessions']} sessions ({_format_size(file_size)})")
+    if meta.get("skipped"):
+        print(f"Skipped {meta['skipped']} abandoned/error sessions")
+    if meta.get("redactions"):
+        print(f"Redacted {meta['redactions']} secrets (API keys, tokens, emails, etc.)")
+    print(f"Models: {', '.join(f'{m} ({c})' for m, c in sorted(meta['models'].items(), key=lambda x: -x[1]))}")
+
+    _print_pii_guidance(output_path)
+
+    config["last_export"] = {
+        "timestamp": meta["exported_at"],
+        "sessions": meta["sessions"],
+        "models": meta["models"],
+    }
+    if args.no_push:
+        config["stage"] = "review"
+    save_config(config)
+
+    if args.no_push:
+        print(f"\nDone! JSONL file: {output_path}")
+        abs_path = str(output_path.resolve())
+        next_steps, next_command = _build_status_next_steps("review", config, None, None)
+        json_block = {
+            "stage": "review",
+            "stage_number": 3,
+            "total_stages": 4,
+            "sessions": meta["sessions"],
+            "output_file": abs_path,
+            "pii_commands": _build_pii_commands(output_path),
+            "next_steps": next_steps,
+            "next_command": next_command,
+        }
+        print("\n---DATACLAW_JSON---")
+        print(json.dumps(json_block, indent=2))
+        return
+
+    if not repo_id:
+        print(f"\nNo HF repo. Log in first: huggingface-cli login")
+        print(f"Then re-run codercrucible and it will auto-detect your username.")
+        print(f"Or set manually: codercrucible config --repo username/my-personal-claude-code-data")
+        print(f"\nLocal file: {output_path}")
+        return
+
+    push_to_huggingface(output_path, repo_id, meta)
+
+    config["stage"] = "done"
+    save_config(config)
+
+    json_block = {
+        "stage": "done",
+        "stage_number": 4,
+        "total_stages": 4,
+        "dataset_url": f"https://huggingface.co/datasets/{repo_id}",
+        "next_steps": [
+            "Done! Dataset is live. To update later: codercrucible export",
+            "To reconfigure: codercrucible prep then codercrucible config",
+        ],
+        "next_command": None,
+    }
+    print("\n---DATACLAW_JSON---")
+    print(json.dumps(json_block, indent=2))
+
+
+def _run_cursor_export(args) -> None:
+    """Run the export flow for Cursor sessions."""
+    from codercrucible.parsers import create_parser
+    
+    # Get Cursor parser
+    parser = create_parser("cursor")
+    if parser is None:
+        print(json.dumps({
+            "error": "Cursor parser not available. Is Cursor IDE installed?"
+        }, indent=2))
+        sys.exit(1)
+    
+    print("=" * 50)
+    print("  CoderCrucible — Cursor Session Exporter")
+    print("=" * 50)
+    
+    # Discover sessions
+    print("\nDiscovering Cursor sessions...")
+    sessions = parser.discover()
+    
+    if not sessions:
+        print("No Cursor sessions found.", file=sys.stderr)
+        sys.exit(1)
+    
+    print(f"Found {len(sessions)} sessions")
+    
+    # Load config for redaction
+    config = load_config()
+    custom_strings = config.get("redact_strings", [])
+    
+    # Export to JSONL
+    output_path = args.output or Path("codercrucible_cursor_sessions.jsonl")
+    
+    # Determine if we should push
+    should_push = not args.no_push
+    
+    # For Cursor export, we don't require the same confirmation flow
+    # since it's a different data source
+    if should_push:
+        # Check HF auth
+        hf_user = get_hf_username()
+        if not hf_user:
+            print(json.dumps({
+                "error": "Not logged in to Hugging Face. Run: huggingface-cli login"
+            }, indent=2))
+            sys.exit(1)
+        
+        repo_id = args.repo or config.get("repo")
+        if not repo_id:
+            repo_id = default_repo_name(hf_user)
+            config["repo"] = repo_id
+            save_config(config)
+    
+    print(f"\nExporting to {output_path}...")
+    
+    total = 0
+    skipped = 0
+    models: dict[str, int] = {}
+    
+    try:
+        fh = open(output_path, "w")
+    except OSError as e:
+        print(f"Error: cannot write to {output_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    with fh as f:
+        for session_meta in sessions:
+            session_id = session_meta["session_id"]
+            
+            # Parse the session
+            parsed = parser.parse(session_id)
+            if parsed is None:
+                skipped += 1
+                continue
+            
+            # Skip sessions without valid model
+            model = parsed.get("model")
+            if not model:
+                skipped += 1
+                continue
+            
+            # Redact secrets
+            from codercrucible.secrets import redact_session
+            parsed, n_redacted = redact_session(parsed, custom_strings=custom_strings)
+            
+            # Write to file
+            f.write(json.dumps(parsed, ensure_ascii=False) + "\n")
+            total += 1
+            models[model] = models.get(model, 0) + 1
+    
+    file_size = output_path.stat().st_size
+    
+    print(f"\nExported {total} sessions ({_format_size(file_size)})")
+    if skipped:
+        print(f"Skipped {skipped} sessions")
+    if models:
+        print(f"Models: {', '.join(f'{m} ({c})' for m, c in sorted(models.items(), key=lambda x: -x[1]))}")
+    
+    # Push to HuggingFace if requested
+    if should_push and total > 0:
+        repo_id = args.repo or config.get("repo")
+        if repo_id:
+            meta = {
+                "sessions": total,
+                "models": models,
+                "agent": "cursor",
+                "exported_at": datetime.now(tz=timezone.utc).isoformat(),
+            }
+            push_to_huggingface(output_path, repo_id, meta)
+    
+    # Save last export info
+    config["last_export"] = {
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "sessions": total,
+        "models": models,
+        "agent": "cursor",
+    }
+    save_config(config)
+    
+    print(f"\nDone! JSONL file: {output_path}")
+    print(json.dumps({
+        "stage": "done",
+        "sessions": total,
+        "output_file": str(output_path.resolve()),
+        "models": models,
+        "next_steps": [
+            "Search indexed sessions: codercrucible search \"your query\"",
+        ],
+    }, indent=2))
 
     print("=" * 50)
     print("  CoderCrucible — Claude Code Log Exporter")

@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel
 
+from .config import DEFAULT_ENRICHMENT_MODEL
+
 
 class IntentType(str, Enum):
     """Intent types for conversation classification."""
@@ -145,6 +147,7 @@ class EnrichmentOrchestrator:
     ```python
     orchestrator = EnrichmentOrchestrator(
         llm_call=my_llm_call,
+        model="llama-3.1-8b-instant",
         batch_size=10,
         max_concurrent=5
     )
@@ -157,9 +160,12 @@ class EnrichmentOrchestrator:
     ```
     """
 
+    DEFAULT_MODEL = DEFAULT_ENRICHMENT_MODEL
+
     def __init__(
         self,
         llm_call: Callable,
+        model: str | None = None,
         batch_size: int = 10,
         max_concurrent: int = 5,
         audit_logging: bool = True,
@@ -170,11 +176,13 @@ class EnrichmentOrchestrator:
         Args:
             llm_call: Callable for making LLM requests. Must return an object
                      with 'content' (str) and 'cost_usd' (float) attributes.
+            model: LLM model to use for enrichment. Defaults to llama-3.1-8b-instant.
             batch_size: Number of sessions to process in a batch.
             max_concurrent: Maximum number of concurrent LLM calls.
             audit_logging: Whether to log enrichment costs to audit.
         """
         self.llm_call = llm_call
+        self.model = model or self.DEFAULT_MODEL
         self.batch_size = batch_size
         self.max_concurrent = max_concurrent
         self.audit_logging = audit_logging
@@ -223,7 +231,6 @@ class EnrichmentOrchestrator:
         text: str,
         dimension: str,
         session_id: str,
-        model: str = "llama-3.1-8b-instant",
     ) -> tuple[str, Any]:
         """Enrich a single text for one dimension."""
         prompt_template = DIMENSION_PROMPTS.get(dimension)
@@ -233,7 +240,7 @@ class EnrichmentOrchestrator:
         prompt = prompt_template.format(text=text)
         response = await self.llm_call(
             prompt=prompt,
-            model=model,
+            model=self.model,
             temperature=0.0,
         )
 
@@ -244,7 +251,7 @@ class EnrichmentOrchestrator:
             cost_usd=getattr(response, "cost_usd", 0.0),
             input_tokens=getattr(response, "input_tokens", 0),
             output_tokens=getattr(response, "output_tokens", 0),
-            model=getattr(response, "model", model),
+            model=getattr(response, "model", self.model),
         )
 
         return dimension, _parse_enrichment_response(response, dimension)
@@ -253,7 +260,7 @@ class EnrichmentOrchestrator:
         self,
         sessions: List[Dict[str, Any]],
         dimensions: List[str],
-        model: str = "llama-3.1-8b-instant",
+        model: str | None = None,
     ) -> List[Dict[str, Any]]:
         """
         Enrich multiple sessions with the specified dimensions.
@@ -264,13 +271,16 @@ class EnrichmentOrchestrator:
             sessions: List of session dictionaries with at least 'id' and 'text'.
             dimensions: List of enrichment dimensions to apply.
                        Supported: "emotional", "security", "intent"
-            model: LLM model to use for enrichment.
+            model: LLM model to use for enrichment. Defaults to the model set in constructor.
 
         Returns:
             List of sessions with enrichment data added.
         """
         if not sessions or not dimensions:
             return sessions
+
+        # Use provided model or fall back to self.model
+        effective_model = model or self.model
 
         # Build list of (session_id, text, dimension) tuples
         tasks = []
@@ -290,9 +300,15 @@ class EnrichmentOrchestrator:
 
         async def bounded_enrich(session_id: str, text: str, dimension: str):
             async with semaphore:
-                return await self._enrich_single_dimension(
-                    text, dimension, session_id, model
-                )
+                # Temporarily set self.model for this call
+                original_model = self.model
+                self.model = effective_model
+                try:
+                    return await self._enrich_single_dimension(
+                        text, dimension, session_id
+                    )
+                finally:
+                    self.model = original_model
 
         task_results = await asyncio.gather(
             *[bounded_enrich(sid, text, dim) for sid, text, dim in tasks],
