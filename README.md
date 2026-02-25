@@ -16,7 +16,8 @@ Why CoderCrucible?
 - Export to any format – JSONL, ChatML, Alpaca – ready for fine‑tuning or research.
 - Auditable – Every change is logged so you know exactly what was redacted.
 
-When you share your anonymized data, you're not just donating – you're breaking the data monopoly and forcing a race to the top: better models, lower prices, and real innovation.
+When you share your anonymized data, you're not just donating – you're breaking the data monopoly and forcing a race to the top: better models, lower prices, and real innovation. You're directly helping counter this sort of behavior: [Disputation on the power and efficacy of big AI](Disputation_on_the_power_and_efficacy_of_big_ai.md)
+
 
 ---
 
