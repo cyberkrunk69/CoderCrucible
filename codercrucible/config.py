@@ -9,6 +9,13 @@ from typing import TypedDict
 CONFIG_DIR = Path.home() / ".codercrucible"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
+# Cost per enrichment session (Groq llama-3.1-8b-instant is ~$0.001/1K tokens)
+# Used as a rough estimate for budget calculations
+COST_PER_SESSION = 0.001
+
+# Default model for enrichment (Groq llama-3.1-8b-instant)
+DEFAULT_ENRICHMENT_MODEL = "llama-3.1-8b-instant"
+
 
 class CoderCrucibleConfig(TypedDict, total=False):
     """Expected shape of the config dict."""
@@ -59,3 +66,26 @@ def get_groq_api_key() -> str | None:
         return api_key
     # Fall back to environment variable
     return os.environ.get("GROQ_API_KEY")
+
+
+def get_enrichment_model() -> str:
+    """Get the default enrichment model from config or ENRICHMENT_MODEL env var.
+    
+    Priority:
+    1. ENRICHMENT_MODEL environment variable
+    2. default_enrichment_model in config file
+    3. DEFAULT_ENRICHMENT_MODEL constant
+    """
+    # Check environment variable first (highest priority)
+    env_model = os.environ.get("ENRICHMENT_MODEL")
+    if env_model:
+        return env_model
+    
+    # Check config file
+    config = load_config()
+    config_model = config.get("default_enrichment_model")
+    if config_model:
+        return config_model
+    
+    # Fall back to default constant
+    return DEFAULT_ENRICHMENT_MODEL
