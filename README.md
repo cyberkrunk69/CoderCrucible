@@ -34,6 +34,7 @@ This is a good-faith effort to advance open source through voluntary, fully prov
 Our goal is to **crowdsource a massive, high‑quality dataset of real coding conversations** – contributed voluntarily by users, fully anonymized, and clean of any proprietary fingerprints – to advance the next generation of coding models.
 
 ---
+DISCLAIMER - The codebase is under rapid development. don't expect it all to work day 1. trying my best to full ass this, gimme a few days to polish. (don't blindly upload your data before being fully fully sure it's clean, don't want to give the big guys or their brother any reason to come after ya') <- officially warned you.
 
 ## Features
 
