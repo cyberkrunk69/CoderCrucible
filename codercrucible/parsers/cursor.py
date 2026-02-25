@@ -12,14 +12,49 @@ from typing import Any
 from .base import BaseParser, ParsedSession, register
 from .utils import (
     temp_copy,
-    normalise_path,
-    extract_timestamp,
     get_platform_storage_path,
     get_workspace_storage_path,
     get_cursor_db_paths,
 )
 
 logger = logging.getLogger(__name__)
+
+# Constants for timestamp handling
+MILLISECONDS_THRESHOLD = 1e10
+MILLISECONDS_TO_SECONDS = 1000
+ISO_DATE_MARKERS = ("T", "-")
+
+# Field names for extracting data from Cursor session JSON
+TIMESTAMP_FIELDS = ["timestamp", "createdAt", "created_at", "startTime", "start_time"]
+MODEL_FIELDS = ["model", "modelId", "model_id", "modelName"]
+GIT_BRANCH_FIELDS = ["gitBranch", "git_branch", "branch", "currentBranch"]
+END_TIME_FIELDS = ["endTime", "end_time", "lastActiveAt"]
+
+# Role mappings
+USER_ROLES = ("user", "human", "prompt")
+ASSISTANT_ROLES = ("assistant", "ai", "bot", "cursor")
+
+
+def _timestamp_sort_key(session: dict[str, Any]) -> str:
+    """Generate a sort key for session timestamps.
+    
+    Handles None values and invalid timestamp strings by returning
+    an empty string, which sorts to the end in reverse order.
+    
+    Args:
+        session: Session dict with optional 'timestamp' key
+        
+    Returns:
+        Timestamp string for sorting, or empty string for invalid values
+    """
+    timestamp = session.get("timestamp")
+    if timestamp is None:
+        return ""
+    if not isinstance(timestamp, str):
+        return ""
+    if not timestamp:
+        return ""
+    return timestamp
 
 
 @register("cursor")
@@ -86,12 +121,15 @@ class CursorParser(BaseParser):
                     sessions.extend(discovered)
                 finally:
                     # Clean up temp file
-                    temp_path.unlink(missing_ok=True)
-            except Exception as e:
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except OSError as unlink_err:
+                        logger.debug(f"Failed to clean up temp file: {unlink_err}")
+            except (FileNotFoundError, PermissionError, OSError) as e:
                 logger.warning(f"Failed to discover sessions from {db_path}: {e}")
         
         # Sort by timestamp (newest first)
-        sessions.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        sessions.sort(key=_timestamp_sort_key, reverse=True)
         
         return sessions
     
@@ -139,7 +177,7 @@ class CursorParser(BaseParser):
                     "source_path": str(original_path),
                     "db_key": key,
                 })
-        except sqlite3.OperationalError as e:
+        except sqlite3.Error as e:
             logger.warning(f"Failed to query cursorDiskKV table: {e}")
         finally:
             conn.close()
@@ -159,19 +197,19 @@ class CursorParser(BaseParser):
             return None
         
         # Try common timestamp fields
-        for field in ["timestamp", "createdAt", "created_at", "startTime", "start_time"]:
+        for field in TIMESTAMP_FIELDS:
             value = data.get(field)
             if value:
                 if isinstance(value, (int, float)):
                     # Unix timestamp (milliseconds)
                     try:
-                        dt = datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+                        dt = datetime.fromtimestamp(value / MILLISECONDS_TO_SECONDS, tz=timezone.utc)
                         return dt.isoformat()
-                    except (ValueError, OSError):
+                    except (ValueError, OSError, OverflowError):
                         pass
                 elif isinstance(value, str):
                     # Already ISO string
-                    if "T" in value or "-" in value:
+                    if any(marker in value for marker in ISO_DATE_MARKERS):
                         return value
         
         return None
@@ -200,8 +238,11 @@ class CursorParser(BaseParser):
                         return result
                 finally:
                     # Clean up temp file
-                    temp_path.unlink(missing_ok=True)
-            except Exception as e:
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except OSError as unlink_err:
+                        logger.debug(f"Failed to clean up temp file: {unlink_err}")
+            except (FileNotFoundError, PermissionError, OSError) as e:
                 logger.debug(f"Failed to parse session {session_id} from {db_path}: {e}")
         
         logger.warning(f"Session {session_id} not found in any database")
@@ -229,7 +270,7 @@ class CursorParser(BaseParser):
                 
                 if row:
                     return self._parse_session_data(session_id, row[0])
-        except sqlite3.OperationalError as e:
+        except sqlite3.Error as e:
             logger.warning(f"Failed to query cursorDiskKV table: {e}")
         finally:
             conn.close()
@@ -323,9 +364,9 @@ class CursorParser(BaseParser):
         role = msg.get("role") or msg.get("type")
         
         # Normalize role
-        if role in ("user", "human", "prompt"):
+        if role in USER_ROLES:
             role = "user"
-        elif role in ("assistant", "ai", "bot", "cursor"):
+        elif role in ASSISTANT_ROLES:
             role = "assistant"
         else:
             # Skip unknown roles
@@ -386,7 +427,7 @@ class CursorParser(BaseParser):
             ts_val = msg["timestamp"]
             if isinstance(ts_val, (int, float)):
                 try:
-                    dt = datetime.fromtimestamp(ts_val / 1000 if ts_val > 1e10 else ts_val, tz=timezone.utc)
+                    dt = datetime.fromtimestamp(ts_val / MILLISECONDS_TO_SECONDS if ts_val > MILLISECONDS_THRESHOLD else ts_val, tz=timezone.utc)
                     timestamp = dt.isoformat()
                 except (ValueError, OSError):
                     pass
@@ -428,42 +469,42 @@ class CursorParser(BaseParser):
         }
         
         # Try common model fields
-        for field in ["model", "modelId", "model_id", "modelName"]:
+        for field in MODEL_FIELDS:
             if field in data:
                 metadata["model"] = data[field]
                 break
         
         # Try git branch
-        for field in ["gitBranch", "git_branch", "branch", "currentBranch"]:
+        for field in GIT_BRANCH_FIELDS:
             if field in data:
                 metadata["git_branch"] = data[field]
                 break
         
         # Try timestamps
-        for field in ["startTime", "start_time", "createdAt", "timestamp"]:
+        for field in TIMESTAMP_FIELDS:
             if field in data:
                 ts_val = data[field]
                 if isinstance(ts_val, (int, float)):
                     try:
-                        dt = datetime.fromtimestamp(ts_val / 1000 if ts_val > 1e10 else ts_val, tz=timezone.utc)
+                        dt = datetime.fromtimestamp(ts_val / MILLISECONDS_TO_SECONDS if ts_val > MILLISECONDS_THRESHOLD else ts_val, tz=timezone.utc)
                         metadata["start_time"] = dt.isoformat()
                         break
-                    except (ValueError, OSError):
+                    except (ValueError, OSError, OverflowError):
                         pass
                 elif isinstance(ts_val, str):
                     metadata["start_time"] = ts_val
                     break
         
         # Try end time
-        for field in ["endTime", "end_time", "lastActiveAt"]:
+        for field in END_TIME_FIELDS:
             if field in data:
                 ts_val = data[field]
                 if isinstance(ts_val, (int, float)):
                     try:
-                        dt = datetime.fromtimestamp(ts_val / 1000 if ts_val > 1e10 else ts_val, tz=timezone.utc)
+                        dt = datetime.fromtimestamp(ts_val / MILLISECONDS_TO_SECONDS if ts_val > MILLISECONDS_THRESHOLD else ts_val, tz=timezone.utc)
                         metadata["end_time"] = dt.isoformat()
                         break
-                    except (ValueError, OSError):
+                    except (ValueError, OSError, OverflowError):
                         pass
                 elif isinstance(ts_val, str):
                     metadata["end_time"] = ts_val

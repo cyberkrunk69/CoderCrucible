@@ -102,22 +102,37 @@ def get_platform_storage_path() -> Path:
     Returns:
         Path to Cursor's globalStorage directory
     """
-    home = Path.home()
-    
-    if os.name == "posix":
+    if os.name == "nt":
+        # Windows
+        return _get_windows_storage_path()
+    elif os.name == "posix":
         if os.uname().sysname == "Darwin":
             # macOS
+            home = Path.home()
             return home / "Library" / "Application Support" / "Cursor" / "User" / "globalStorage"
         else:
             # Linux
+            home = Path.home()
             return home / ".config" / "Cursor" / "User" / "globalStorage"
-    elif os.name == "nt":
-        # Windows
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "Cursor" / "User" / "globalStorage"
     
     # Fallback to Linux path
+    home = Path.home()
+    return home / ".config" / "Cursor" / "User" / "globalStorage"
+
+
+def _get_windows_storage_path() -> Path:
+    """Get the Windows storage path for Cursor.
+    
+    Returns:
+        Path to Cursor's globalStorage directory on Windows
+    """
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        # Use string manipulation to avoid WindowsPath instantiation issues on non-Windows
+        return Path(appdata) / "Cursor" / "User" / "globalStorage"
+    
+    # Fallback
+    home = Path.home()
     return home / ".config" / "Cursor" / "User" / "globalStorage"
 
 
