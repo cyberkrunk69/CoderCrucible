@@ -1,21 +1,66 @@
 """CLI for CoderCrucible — export Claude Code conversations to Hugging Face."""
 
 import argparse
+import asyncio
 import json
 import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .parser import AnonymizerWrapper
-from .config import CONFIG_FILE, CoderCrucibleConfig, load_config, save_config
-from .parser import CLAUDE_DIR, discover_projects, parse_project_sessions
+from .parser import AnonymizerWrapper, CLAUDE_DIR
+from .parsers import create_parser, list_available_parsers
+from .config import CONFIG_FILE, CoderCrucibleConfig, load_config, save_config, get_groq_api_key
+
+# Re-export for backward compatibility with tests
+from .parser import discover_projects, parse_project_sessions
 from .secrets import redact_session
 from .search import SEARCH_DB_PATH, build_index, search as do_search, get_index_stats
+from .enrichment import EnrichmentOrchestrator
 
 HF_TAG = "codercrucible"
 REPO_URL = "https://github.com/banodoco/codercrucible"
 SKILL_URL = "https://raw.githubusercontent.com/banodoco/codercrucible/main/docs/SKILL.md"
+
+
+def _get_claude_parser(claude_dir: Path | None = None):
+    """Get a Claude parser instance using the registry."""
+    parser = create_parser("claude", claude_dir=claude_dir)
+    if parser is None:
+        raise RuntimeError("Claude parser not found. Is codercrucible properly installed?")
+    return parser
+
+
+def _discover_projects(claude_dir: Path | None = None) -> list[dict]:
+    """Discover projects using the parser registry.
+    
+    This function is used internally. For testing, monkeypatch
+    the exported discover_projects from parser.py instead.
+    """
+    # Use the exported function which can be monkeypatched in tests
+    return discover_projects(claude_dir=claude_dir)
+
+
+def _parse_project_sessions(
+    project_dir_name: str,
+    anonymizer: AnonymizerWrapper,
+    include_thinking: bool = True,
+    claude_dir: Path | None = None,
+    anonymize: bool = True,
+) -> list[dict]:
+    """Parse project sessions using the parser registry.
+    
+    This function is used internally. For testing, monkeypatch
+    the exported parse_project_sessions from parser.py instead.
+    """
+    # Use the exported function which can be monkeypatched in tests
+    return parse_project_sessions(
+        project_dir_name,
+        anonymizer=anonymizer,
+        include_thinking=include_thinking,
+        claude_dir=claude_dir,
+        anonymize=anonymize,
+    )
 
 
 def _mask_secret(s: str) -> str:
@@ -150,7 +195,7 @@ def _build_status_next_steps(
 
 def list_projects(claude_dir: Path | None = None) -> None:
     """Print all projects as JSON (for agents to parse)."""
-    projects = discover_projects(claude_dir=claude_dir)
+    projects = _discover_projects(claude_dir=claude_dir)
     if not projects:
         print("No Claude Code sessions found.")
         return
@@ -221,7 +266,7 @@ def export_to_jsonl(
     with fh as f:
         for project in selected_projects:
             print(f"  Parsing {project['display_name']}...", end="", flush=True)
-            sessions = parse_project_sessions(
+            sessions = _parse_project_sessions(
                 project["dir_name"], anonymizer=anonymizer,
                 include_thinking=include_thinking,
             )
@@ -608,7 +653,7 @@ def prep(claude_dir: Path | None = None) -> None:
         print(json.dumps({"error": "~/.claude not found. Is Claude Code installed?"}))
         sys.exit(1)
 
-    projects = discover_projects(claude_dir=effective_claude_dir)
+    projects = _discover_projects(claude_dir=effective_claude_dir)
     if not projects:
         print(json.dumps({"error": "No Claude Code sessions found."}))
         sys.exit(1)
@@ -698,6 +743,22 @@ def main() -> None:
     idx.add_argument("--projects", type=str, help="Comma-separated projects to index (default: all)")
     idx.add_argument("--force", action="store_true", help="Rebuild index from scratch")
 
+    # Think Cheap enrichment subcommand
+    tc = sub.add_parser("think-cheap", help="Enrich sessions with semantic tags using Groq LLM")
+    tc.add_argument("--dimensions", type=str,
+                    default="intent,emotional,security",
+                    help="Comma-separated enrichment dimensions (default: intent,emotional,security)")
+    tc.add_argument("--input", "-i", type=str, required=True,
+                    help="Path to input JSONL file with parsed sessions")
+    tc.add_argument("--output", "-o", type=str, required=True,
+                    help="Path to write enriched JSONL output")
+    tc.add_argument("--limit", type=int, default=0,
+                    help="Max sessions to process (0 for no limit, default: 0)")
+    tc.add_argument("--budget", type=float, default=0.50,
+                    help="Max cost in USD (default: 0.50)")
+    tc.add_argument("--model", type=str, default="llama-3.1-8b-instant",
+                    help="LLM model to use (default: llama-3.1-8b-instant)")
+
     sch = sub.add_parser("search", help="Search indexed sessions")
     sch.add_argument("query", type=str, help="Search query string")
     sch.add_argument("--limit", "-n", type=int, default=20, help="Max results (default: 20)")
@@ -744,6 +805,10 @@ def main() -> None:
 
     if command == "index":
         _handle_index(args, claude_dir=claude_dir)
+        return
+
+    if command == "think-cheap":
+        _handle_think_cheap(args)
         return
 
     if command == "search":
@@ -815,6 +880,156 @@ def _handle_index(args, claude_dir: Path | None = None) -> None:
         "next_steps": [
             "Search your conversations: codercrucible search \"your query\"",
             "Re-index after new sessions: codercrucible index",
+        ],
+        "next_command": None,
+    }, indent=2))
+
+
+def _handle_think_cheap(args) -> None:
+    """Handle the think-cheap subcommand - enrich sessions with semantic tags."""
+    # Get API key from config or environment
+    api_key = get_groq_api_key()
+    if not api_key:
+        print(json.dumps({
+            "error": "Groq API key not found. Set GROQ_API_KEY environment variable "
+                     "or configure with: codercrucible config --groq-key YOUR_KEY"
+        }, indent=2))
+        sys.exit(1)
+
+    # Parse dimensions
+    dimensions = [d.strip() for d in args.dimensions.split(",") if d.strip()]
+    if not dimensions:
+        print(json.dumps({"error": "At least one dimension must be specified"}, indent=2))
+        sys.exit(1)
+
+    # Validate input file
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(json.dumps({"error": f"Input file not found: {input_path}"}, indent=2))
+        sys.exit(1)
+
+    # Read sessions from input JSONL
+    sessions = []
+    try:
+        with open(input_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                session = json.loads(line)
+                sessions.append(session)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"error": f"Invalid JSON in input file: {e}"}, indent=2))
+        sys.exit(1)
+
+    if not sessions:
+        print(json.dumps({"error": "No sessions found in input file"}, indent=2))
+        sys.exit(1)
+
+    # Apply limit if specified
+    if args.limit > 0:
+        sessions = sessions[:args.limit]
+
+    print("=" * 50)
+    print("  CoderCrucible — Think Cheap Enrichment")
+    print("=" * 50)
+    print(f"Input: {input_path}")
+    print(f"Sessions: {len(sessions)}")
+    print(f"Dimensions: {', '.join(dimensions)}")
+    print(f"Model: {args.model}")
+    print(f"Budget: ${args.budget:.2f}")
+    print()
+
+    # Create LLM callable using scout.llm
+    def create_llm_call():
+        """Create an async LLM call function that uses scout.llm.router.call_llm."""
+        async def llm_call(prompt: str, model: str, temperature: float = 0.0):
+            try:
+                from scout.llm.router import call_llm
+                response = await call_llm(
+                    prompt=prompt,
+                    model=model,
+                    api_key=api_key,
+                    temperature=temperature,
+                )
+                return response
+            except ImportError as e:
+                print(json.dumps({
+                    "error": "scout.llm not available. Install with: pip install scout-app"
+                }, indent=2))
+                sys.exit(1)
+            except Exception as e:
+                print(json.dumps({
+                    "error": f"LLM call failed: {str(e)}"
+                }, indent=2))
+                sys.exit(1)
+        return llm_call
+
+    # Create orchestrator
+    llm_call = create_llm_call()
+    orchestrator = EnrichmentOrchestrator(
+        llm_call=llm_call,
+        model=args.model,
+        audit_logging=True,
+    )
+
+    # Track costs
+    total_cost = 0.0
+
+    # Process sessions
+    async def run_enrichment():
+        nonlocal total_cost
+        # Process in batches
+        batch_size = 10
+        enriched_sessions = []
+
+        for i in range(0, len(sessions), batch_size):
+            batch = sessions[i:i + batch_size]
+            print(f"Processing batch {i // batch_size + 1}/{(len(sessions) + batch_size - 1) // batch_size}...")
+
+            # Check budget
+            if args.budget > 0 and total_cost >= args.budget:
+                print(f"Budget limit (${args.budget:.2f}) reached. Stopping.")
+                break
+
+            enriched = await orchestrator.enrich_sessions(
+                batch,
+                dimensions=dimensions,
+            )
+            enriched_sessions.extend(enriched)
+
+            # Track approximate cost (this is a rough estimate)
+            total_cost += len(batch) * len(dimensions) * 0.001  # Rough estimate
+
+        return enriched_sessions
+
+    # Run enrichment
+    enriched_sessions = asyncio.run(run_enrichment())
+
+    # Write output
+    output_path = Path(args.output)
+    try:
+        with open(output_path, "w") as f:
+            for session in enriched_sessions:
+                f.write(json.dumps(session, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(json.dumps({"error": f"Failed to write output: {e}"}, indent=2))
+        sys.exit(1)
+
+    print()
+    print(f"Enriched {len(enriched_sessions)} sessions")
+    print(f"Output: {output_path}")
+    print(f"Estimated cost: ${total_cost:.4f}")
+
+    print(json.dumps({
+        "stage": "enriched",
+        "sessions_enriched": len(enriched_sessions),
+        "output_file": str(output_path),
+        "dimensions": dimensions,
+        "model": args.model,
+        "estimated_cost_usd": total_cost,
+        "next_steps": [
+            "Search enriched sessions: codercrucible search \"your query\"",
         ],
         "next_command": None,
     }, indent=2))
@@ -893,7 +1108,7 @@ def _run_export(args) -> None:
         print(f"Error: {CLAUDE_DIR} not found. Is Claude Code installed?", file=sys.stderr)
         sys.exit(1)
 
-    projects = discover_projects()
+    projects = _discover_projects()
     if not projects:
         print("No Claude Code sessions found.", file=sys.stderr)
         sys.exit(1)

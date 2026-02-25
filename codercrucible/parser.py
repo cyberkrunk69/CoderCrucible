@@ -74,9 +74,11 @@ class PassthroughAnonymizer:
     def path(self, file_path: str) -> str:
         return file_path
 
+
 # Claude Code directory - can be overridden via CLAUDE_DIR environment variable
 # or by passing a custom path to functions that need it
 _DEFAULT_CLAUDE_DIR = Path.home() / ".claude"
+
 
 def get_claude_dir() -> Path:
     """Get the Claude Code directory, respecting CLAUDE_DIR environment variable."""
@@ -84,6 +86,7 @@ def get_claude_dir() -> Path:
     if env_path:
         return Path(env_path)
     return _DEFAULT_CLAUDE_DIR
+
 
 # For backward compatibility - but code should use get_claude_dir() instead
 CLAUDE_DIR = _DEFAULT_CLAUDE_DIR
