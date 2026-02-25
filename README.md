@@ -20,9 +20,9 @@ When you share your anonymized data, you're not just donating – you're breakin
 
 ---
 
-## Why this fork exists
-
-The original CoderCrucible was built to export Claude Code conversations to Hugging Face. This fork goes further:
+## Why this exists
+Dataclaw was built to export Claude Code conversations to Hugging Face. While I believe that to be protected speech, I'm sure many disagree. This new project exists because Dataclaw (even the name is asking to be taken down) is too easily delegitimized and dismissed.
+This is a good-faith effort to advance open source through voluntary, fully provider and user-PII anonymized data distribution. Huggingface has shown their true face already by taking down the personal logs of the author of Dataclaw from their servers. (404 free speech not found). So we go peer-to-peer or put it on the blockchain; I don't know, but I'm sure some of you have ideas..
 
 - **Anonymization by default** – Not just usernames and paths, but also **model names**, provider fingerprints, and even subtle watermarks (like token‑specific patterns) are stripped.  
 - **Local search** – Index your conversations with BM25F and AST, so you can instantly find that bug fix you discussed months ago.  
