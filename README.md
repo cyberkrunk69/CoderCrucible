@@ -199,7 +199,7 @@ Our immediate roadmap:
 - [ ] Improve watermark detection (ML‑based fingerprint removal)
 - [ ] Add quality scoring (heuristic + LLM)
 - [ ] Build a public dataset repository on Hugging Face with a unified license
-
+- [ ] Go peer to peer to truly "Be like water".
 ---
 
 ## License
@@ -207,7 +207,3 @@ Our immediate roadmap:
 This fork is released under the **MIT License**, same as the original CoderCrucible. All contributed data remains the property of the contributors; we only provide the tool.
 
 ---
-
-## Acknowledgments
-
-Huge thanks to the original CoderCrucible authors for the excellent foundation. This fork builds on their work to create a more privacy‑conscious, legally‑safe, and feature‑rich tool for the community.
