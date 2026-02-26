@@ -255,4 +255,4 @@ This fork is released under the **MIT License**, same as the original CoderCruci
 
 ---
 
-oh yeah almost forgot to mention.. this is obviously perfromance art. and remember "art is like porn - i know it when i see it"
+oh yeah almost forgot to mention.. this is obviously performance art. and remember "art is like porn - i know it when i see it"
